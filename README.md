@@ -17,7 +17,7 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-To host it, enable GitHub Pages for this repository (Settings → Pages → deploy from branch, root folder).
+`netlify.toml` publishes the repo root with no build, the same setup as Springo. Connect the repo in Netlify (Add new site → Import from Git) and every push deploys.
 
 ## Data
 
