@@ -1,4 +1,11 @@
 import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
+import { sunPosition, sunTimes } from './sun.js';
+import { ShadowRenderer } from './shadow.js';
+
+// Time zone of the map location, so the time slider reads in local time there.
+const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
+  .then((m) => m.default)
+  .catch(() => null);
 
 // AWS Open Data terrain tiles (Terrarium encoding): elevation in meters =
 // R * 256 + G + B / 256 - 32768.
@@ -53,6 +60,15 @@ const ui = {
   hillshade: $('ov-hillshade'),
   roads: $('ov-roads'),
   cursor: $('cursor'),
+  sun: $('ov-sun'),
+  sunSection: $('sun-section'),
+  sunDate: $('sun-date'),
+  sunTime: $('sun-time'),
+  sunTimeValue: $('sun-time-value'),
+  sunPlay: $('sun-play'),
+  sunrise: $('sunrise'),
+  sunset: $('sunset'),
+  sunInfo: $('sun-info'),
 };
 
 const state = {
@@ -77,6 +93,12 @@ const sources = {
   },
   roads: { type: 'raster', tiles: [ROADS_TILES[0]], tileSize: 256, maxzoom: 19, attribution: '© Esri' },
   places: { type: 'raster', tiles: [ROADS_TILES[1]], tileSize: 256, maxzoom: 19 },
+  sun: {
+    type: 'canvas',
+    canvas: Object.assign(document.createElement('canvas'), { width: 1, height: 1 }),
+    coordinates: [[-100, 40], [-99, 40], [-99, 39], [-100, 39]],
+    animate: false,
+  },
 };
 const layers = [];
 for (const [id, b] of Object.entries(BASEMAPS)) {
@@ -95,6 +117,13 @@ layers.push(
     type: 'color-relief',
     source: 'dem',
     paint: { 'color-relief-opacity': Number(ui.opacity.value), 'color-relief-color': reliefExpression() },
+  },
+  {
+    id: 'sun',
+    type: 'raster',
+    source: 'sun',
+    layout: { visibility: 'none' },
+    paint: { 'raster-opacity': Number(ui.opacity.value), 'raster-fade-duration': 0 },
   },
   { id: 'roads', type: 'raster', source: 'roads', layout: { visibility: 'none' } },
   { id: 'places', type: 'raster', source: 'places', layout: { visibility: 'none' } },
@@ -310,6 +339,7 @@ ui.peak.addEventListener('click', () => {
 
 ui.opacity.addEventListener('input', () => {
   map.setPaintProperty('elevation-shading', 'color-relief-opacity', Number(ui.opacity.value));
+  map.setPaintProperty('sun', 'raster-opacity', Number(ui.opacity.value));
 });
 
 const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
@@ -373,9 +403,200 @@ async function showCursor(lngLat) {
 map.on('mousemove', (e) => showCursor(e.lngLat));
 map.on('click', (e) => showCursor(e.lngLat));
 
+// ---------- Sun exposure ----------
+
+const sun = {
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  lat: 0,
+  lng: 0,
+  times: null,
+  time: null, // ms since epoch shown on the slider
+  playTimer: null,
+};
+const MIN_MS = 60000;
+const MARGIN_MS = 20 * MIN_MS; // slider starts this long before sunrise and ends after sunset
+let shadowRenderer = null;
+
+const formatTime = (ms, withZone = false) =>
+  new Intl.DateTimeFormat([], { timeZone: sun.tz, hour: 'numeric', minute: '2-digit', ...(withZone && { timeZoneName: 'short' }) })
+    .format(new Date(ms));
+const todayIn = (tz) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+// Recomputes sunrise/sunset for the view center and the chosen date, keeping
+// the slider at the same offset from solar noon.
+async function updateSunRange() {
+  const c = map.getCenter();
+  const lookup = await tzLookup;
+  try {
+    if (lookup) sun.tz = lookup(c.lat, c.lng);
+  } catch {
+    // outside any zone polygon: keep the previous zone
+  }
+  if (!ui.sunDate.value) ui.sunDate.value = todayIn(sun.tz);
+  const [y, m, d] = ui.sunDate.value.split('-').map(Number);
+  // Roughly local noon on the chosen date, so the lookup lands on that solar day.
+  const ref = new Date(Date.UTC(y, m - 1, d, 12) - (c.lng / 15) * 3600000);
+  const prev = sun.times;
+  const times = sunTimes(ref, c.lat, c.lng);
+  const noon = times.noon.getTime();
+  const lo = times.sunrise ? times.sunrise.getTime() - MARGIN_MS : noon - 12 * 3600000;
+  const hi = times.sunset ? times.sunset.getTime() + MARGIN_MS : noon + 12 * 3600000;
+
+  let t;
+  if (sun.time != null && prev) t = noon + (sun.time - prev.noon.getTime());
+  else t = Date.now() >= lo && Date.now() <= hi && ui.sunDate.value === todayIn(sun.tz) ? Date.now() : noon;
+  sun.lat = c.lat;
+  sun.lng = c.lng;
+  sun.times = times;
+  sun.time = Math.min(hi, Math.max(lo, t));
+
+  const s = ui.sunTime;
+  s.min = Math.floor(lo / MIN_MS);
+  s.max = Math.ceil(hi / MIN_MS);
+  s.step = 1;
+  s.value = Math.round(sun.time / MIN_MS);
+  if (times.polar) {
+    ui.sunrise.textContent = times.polar === 'day' ? 'Sun up all day' : 'Sun down all day';
+    ui.sunset.textContent = '';
+  } else {
+    ui.sunrise.textContent = `Sunrise ${formatTime(times.sunrise)}`;
+    ui.sunset.textContent = `Sunset ${formatTime(times.sunset)}`;
+  }
+  drawSun();
+}
+
+function drawSun() {
+  ui.sunTimeValue.textContent = formatTime(sun.time, true);
+  const { azimuth, altitude } = sunPosition(new Date(sun.time), sun.lat, sun.lng);
+  const deg = (r) => Math.round((r * 180) / Math.PI);
+  const az = (deg(azimuth) + 360) % 360;
+  const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
+  ui.sunInfo.textContent = altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon';
+  if (!ui.sun.checked || !shadowRenderer) return;
+  shadowRenderer.render(azimuth, altitude);
+  // The canvas source only re-reads the canvas while "playing".
+  const source = map.getSource('sun');
+  source.play();
+  requestAnimationFrame(() => requestAnimationFrame(() => source.pause()));
+}
+
+// Loads elevation for the view plus a one-tile margin, so ridges just outside
+// the view still cast shadows into it, and hands it to the shadow renderer.
+let sunRun = 0;
+async function updateSunGrid() {
+  if (!ui.sun.checked) return;
+  const run = ++sunRun;
+  if (!shadowRenderer) {
+    try {
+      shadowRenderer = new ShadowRenderer(map.getSource('sun').getCanvas());
+    } catch (e) {
+      ui.sunInfo.textContent = `Sun exposure needs WebGL2: ${e.message}`;
+      return;
+    }
+  }
+  const MAX_SIDE = 7; // tiles per side including margin, 1792 px
+  let z = Math.min(DEM_MAX_ZOOM, Math.max(0, Math.floor(map.getZoom()) + 1));
+  let r = viewTileRange(z);
+  while (z > 0 && (r.x1 - r.x0 + 3 > MAX_SIDE || r.y1 - r.y0 + 3 > MAX_SIDE)) {
+    z--;
+    r = viewTileRange(z);
+  }
+  const gx0 = r.x0 - 1;
+  const gy0 = Math.max(0, r.y0 - 1);
+  const gy1 = Math.min(r.n - 1, r.y1 + 1);
+  const nx = r.x1 + 1 - gx0 + 1;
+  const ny = gy1 - gy0 + 1;
+  const S = DEM_TILE_SIZE;
+  const W = nx * S;
+  const H = ny * S;
+
+  const jobs = [];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const tx = gx0 + i;
+      jobs.push(loadTile(z, ((tx % r.n) + r.n) % r.n, gy0 + j).then((elev) => ({ i, j, elev })));
+    }
+  }
+  const tiles = await Promise.all(jobs);
+  if (run !== sunRun || !ui.sun.checked) return;
+
+  const data = new Float32Array(W * H);
+  let maxElev = -Infinity;
+  for (const { i, j, elev } of tiles) {
+    if (!elev) continue;
+    for (let py = 0; py < S; py++) {
+      const row = elev.subarray(py * S, py * S + S);
+      data.set(row, (j * S + py) * W + i * S);
+      for (let k = 0; k < S; k++) if (row[k] > maxElev) maxElev = row[k];
+    }
+  }
+  shadowRenderer.setGrid({ data, width: W, height: H, z, originY: gy0 * S, maxElev });
+  map.getSource('sun').setCoordinates([
+    [xToLng(gx0, r.n), yToLat(gy0, r.n)],
+    [xToLng(gx0 + nx, r.n), yToLat(gy0, r.n)],
+    [xToLng(gx0 + nx, r.n), yToLat(gy0 + ny, r.n)],
+    [xToLng(gx0, r.n), yToLat(gy0 + ny, r.n)],
+  ]);
+  drawSun();
+}
+
+function setSunEnabled(on) {
+  ui.sun.checked = on;
+  ui.sunSection.classList.toggle('on', on);
+  setVisible('sun', on);
+  if (on) updateSunGrid();
+  else stopPlay();
+}
+
+ui.sun.addEventListener('change', () => setSunEnabled(ui.sun.checked));
+
+ui.sunTime.addEventListener('input', () => {
+  if (!ui.sun.checked) setSunEnabled(true);
+  sun.time = Number(ui.sunTime.value) * MIN_MS;
+  drawSun();
+});
+
+ui.sunDate.addEventListener('change', () => {
+  if (!ui.sunDate.value) ui.sunDate.value = todayIn(sun.tz);
+  if (!ui.sun.checked) setSunEnabled(true);
+  updateSunRange();
+});
+
+function stopPlay() {
+  clearInterval(sun.playTimer);
+  sun.playTimer = null;
+  ui.sunPlay.textContent = '▶';
+  ui.sunPlay.setAttribute('aria-label', 'Play');
+}
+ui.sunPlay.addEventListener('click', () => {
+  if (sun.playTimer) return stopPlay();
+  if (!ui.sun.checked) setSunEnabled(true);
+  const s = ui.sunTime;
+  if (Number(s.value) >= Number(s.max)) s.value = s.min;
+  ui.sunPlay.textContent = '❚❚';
+  ui.sunPlay.setAttribute('aria-label', 'Pause');
+  sun.playTimer = setInterval(() => {
+    const next = Math.min(Number(s.max), Number(s.value) + 5);
+    s.value = next;
+    sun.time = next * MIN_MS;
+    drawSun();
+    if (next >= Number(s.max)) stopPlay();
+  }, 80);
+});
+
+// ---------- View changes ----------
+
 let statsTimer;
 map.on('moveend', () => {
   clearTimeout(statsTimer);
-  statsTimer = setTimeout(computeViewStats, 150);
+  statsTimer = setTimeout(() => {
+    computeViewStats();
+    updateSunRange();
+    updateSunGrid();
+  }, 150);
 });
-map.on('load', computeViewStats);
+map.on('load', () => {
+  computeViewStats();
+  updateSunRange();
+});

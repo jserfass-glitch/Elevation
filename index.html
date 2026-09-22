@@ -34,6 +34,23 @@
         </div>
       </section>
 
+      <section id="sun-section">
+        <div class="row">
+          <label><input type="checkbox" id="ov-sun"> <strong>Sun exposure</strong></label>
+          <input id="sun-date" type="date" aria-label="Date">
+        </div>
+        <div class="row">
+          <button id="sun-play" type="button" title="Play through the day" aria-label="Play">▶</button>
+          <input id="sun-time" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
+          <output id="sun-time-value">–</output>
+        </div>
+        <div class="row small muted">
+          <span id="sunrise">–</span>
+          <span id="sunset">–</span>
+        </div>
+        <div id="sun-info" class="small muted"></div>
+      </section>
+
       <section>
         <h2>Base map</h2>
         <div class="choices" role="radiogroup">
