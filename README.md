@@ -8,7 +8,7 @@ A static web map that shades terrain above a chosen elevation, similar to CalTop
 - The dot marks the highest point in view. Click "Highest in view" to zoom to it.
 - Sun exposure: pick a date and drag the time slider, which runs from 20 minutes before sunrise to 20 minutes after sunset at the map center. Sunlit ground is shaded yellow, brighter where the sun hits the slope more directly. Terrain shadows cast by ridges are included. The play button steps through the day. Times are shown in the map location's time zone.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite.
-- Overlays: elevation shading, hillshade, roads and place labels.
+- Overlays: hillshade, roads and place labels. Shade above, sun exposure and slope direction each have their own on/off checkbox.
 - The URL hash keeps the map position, so views can be bookmarked.
 
 ## Run locally

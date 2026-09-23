@@ -65,6 +65,7 @@ section:first-of-type { border-top: 0; padding-top: 0; }
 #sun-time-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #sun-date { font: inherit; font-size: 12px; color: inherit; background: none; border: 1px solid var(--border); border-radius: 4px; }
 #sun-play { width: 28px; padding: 0; }
+#shade-section:not(.on) .row:not(:first-child), #shade-section:not(.on) #threshold, #shade-section:not(.on) #ramp,
 #sun-section:not(.on) .row:not(:first-child), #sun-section:not(.on) #sun-info { opacity: 0.5; }
 
 #ramp {

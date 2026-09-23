@@ -23,12 +23,12 @@
     </form>
 
     <div id="panel-body">
-      <section>
+      <section id="shade-section" class="on">
         <div class="row">
-          <label for="threshold">Shade above</label>
+          <label><input type="checkbox" id="ov-shade" checked> <strong>Shade above</strong></label>
           <output id="threshold-value">–</output>
         </div>
-        <input id="threshold" type="range" min="0" max="1" step="1" value="0" disabled>
+        <input id="threshold" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
         <div class="row small muted">
           <span id="range-min">–</span>
           <span id="range-max">–</span>
@@ -95,7 +95,6 @@
       <section>
         <h2>Overlays</h2>
         <div class="choices">
-          <label><input type="checkbox" id="ov-shade" checked> Elevation shading</label>
           <label><input type="checkbox" id="ov-hillshade" checked> Hillshade</label>
           <label><input type="checkbox" id="ov-roads"> Roads &amp; places</label>
         </div>

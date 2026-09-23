@@ -312,7 +312,8 @@ async function computeViewStats() {
   syncSlider();
   updateShading();
 
-  peakMarker.setLngLat(state.peak).addTo(map);
+  peakMarker.setLngLat(state.peak);
+  if (ui.shade.checked) peakMarker.addTo(map);
 }
 
 // ---------- UI ----------
@@ -340,6 +341,7 @@ function syncSlider() {
 }
 
 ui.threshold.addEventListener('input', () => {
+  if (!ui.shade.checked) setShadeEnabled(true);
   const v = Number(ui.threshold.value);
   state.threshold = v <= Number(ui.threshold.min) ? null : fromUnits(v);
   ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
@@ -357,13 +359,14 @@ ui.opacity.addEventListener('input', () => {
 });
 
 const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
-ui.shade.addEventListener('change', () => {
-  setVisible('elevation-shading', ui.shade.checked);
-  if (state.peak) {
-    if (ui.shade.checked) peakMarker.addTo(map);
-    else peakMarker.remove();
-  }
-});
+function setShadeEnabled(on) {
+  ui.shade.checked = on;
+  $('shade-section').classList.toggle('on', on);
+  setVisible('elevation-shading', on);
+  if (on && state.peak) peakMarker.addTo(map);
+  else peakMarker.remove();
+}
+ui.shade.addEventListener('change', () => setShadeEnabled(ui.shade.checked));
 ui.hillshade.addEventListener('change', () => setVisible('hillshade', ui.hillshade.checked));
 ui.roads.addEventListener('change', () => {
   setVisible('roads', ui.roads.checked);
