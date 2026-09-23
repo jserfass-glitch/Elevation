@@ -1,6 +1,6 @@
 // WebGL2 overlays computed from a Web Mercator elevation grid.
 //
-// SunRenderer: a pixel is lit when its slope faces the sun and no terrain
+// SunRenderer: shades ground in shadow. A pixel is lit when its slope faces the sun and no terrain
 // between it and the sun rises above the ray toward the sun (cast shadows).
 // AspectRenderer: a pixel is shaded when the direction its slope faces falls
 // inside a compass arc.
@@ -49,13 +49,17 @@ vec2 gradient(ivec2 p, float pix) {
 const SUN_FRAGMENT = `${COMMON}
 uniform vec3 uSun;        // unit vector toward the sun: east, north, up
 uniform float uMaxElev;
-uniform float uScreenPx;  // screen pixels per grid pixel, keeps hatching a fixed size on screen
 const int MAX_STEPS = 1500;
+const float MAX_ALPHA = 0.7;
 
+// Shadowed ground gets a dark veil and sunlit ground is left clear, so the
+// map and other overlays stay readable where the sun is. Slopes the sun only
+// grazes fade in gradually instead of switching on at a hard edge.
 void main() {
   ivec2 p = gridPixel();
-  outColor = vec4(0.0);
-  if (uSun.z <= 0.0) return;
+  vec4 shadow = vec4(uColor * MAX_ALPHA, MAX_ALPHA); // premultiplied
+  outColor = shadow;
+  if (uSun.z <= 0.0) return; // sun below the horizon
 
   float pix = pixelMeters(p);
   float e = elev(p);
@@ -74,22 +78,10 @@ void main() {
       if (h > uMaxElev) break;
       vec2 s = q + dir * float(i);
       if (s.x < 0.0 || s.y < 0.0 || s.x >= float(uSize.x) || s.y >= float(uSize.y)) break;
-      if (texelFetch(uDem, ivec2(s), 0).r > h + 1.0) return; // blocked
+      if (texelFetch(uDem, ivec2(s), 0).r > h + 1.0) return; // blocked by terrain
     }
   }
-  // Diagonal hatching so sunlit ground reads clearly on top of other color
-  // overlays: a light tint, then yellow stripes with a dark edge.
-  const float PERIOD = 9.0;   // screen pixels between stripes
-  const float HALF_W = 1.0;   // stripe half-width, screen pixels
-  float u = (float(p.x) + float(p.y)) * 0.70710678 * uScreenPx;
-  float d = abs(mod(u, PERIOD) - 0.5 * PERIOD);
-  float stripe = 1.0 - smoothstep(HALF_W - 0.5, HALF_W + 0.5, d);
-  float edge = (1.0 - smoothstep(HALF_W + 0.5, HALF_W + 1.3, d)) - stripe;
-  float tint = 0.1 + 0.15 * incidence;
-  vec4 c = vec4(uColor * tint, tint);                                 // premultiplied
-  c = vec4(0.28, 0.2, 0.0, 1.0) * edge * 0.9 + c * (1.0 - edge * 0.9);
-  c = vec4(uColor, 1.0) * stripe + c * (1.0 - stripe);
-  outColor = c;
+  outColor = shadow * (1.0 - smoothstep(0.0, 0.2, incidence));
 }`;
 
 const ASPECT_FRAGMENT = `${COMMON}
@@ -187,13 +179,7 @@ class GridRenderer {
 
 export class SunRenderer extends GridRenderer {
   constructor(canvas) {
-    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev', 'uScreenPx'], [1.0, 0.82, 0.12]);
-    this.screenPx = 1;
-  }
-
-  /** Screen pixels per grid pixel at the current map zoom. */
-  setScreenScale(screenPx) {
-    this.screenPx = screenPx;
+    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev'], [0.06, 0.1, 0.26]);
   }
 
   setGrid(grid) {
@@ -207,7 +193,6 @@ export class SunRenderer extends GridRenderer {
     const gl = this.gl;
     const c = Math.cos(altitude);
     gl.uniform3f(this.u.uSun, Math.sin(azimuth) * c, Math.cos(azimuth) * c, Math.sin(altitude));
-    gl.uniform1f(this.u.uScreenPx, this.screenPx);
     this.draw();
   }
 }

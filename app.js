@@ -388,8 +388,6 @@ function drawSun() {
   const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
   ui.sunInfo.textContent = altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon';
   if (!ui.sun.checked || !renderers.sun?.grid) return;
-  // MapLibre draws 512 px per world tile at zoom 0; the grid has 256 px per tile at its zoom.
-  renderers.sun.setScreenScale(2 ** (map.getZoom() - renderers.sun.grid.z + 1));
   renderers.sun.render(azimuth, altitude);
   refreshCanvasSource('sun');
 }

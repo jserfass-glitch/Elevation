@@ -5,7 +5,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 ## Features
 
 - **Shade above**: the slider runs from the lowest to the highest elevation in the current view. At the minimum everything is shaded. Moving it up shades only terrain above that value, with a yellow-to-red ramp up to the highest point. The dot marks the highest point in view, and "Highest in view" zooms to it.
-- **Sun exposure**: pick a date and drag the time slider, which runs from 20 minutes before sunrise to 20 minutes after sunset at the map center. Sunlit ground gets yellow diagonal hatching, so it stays readable on top of the elevation colors. Shadows cast by ridges are included. The play button steps through the day. Times are in the map location's time zone.
+- **Sun exposure**: pick a date and drag the time slider, which runs from 20 minutes before sunrise to 20 minutes after sunset at the map center. Ground in shadow is darkened with a navy veil and sunlit ground is left clear, so the map and the elevation colors stay readable where the sun is. Slopes the sun only grazes fade in gradually. Shadows cast by ridges are included. The play button steps through the day. Times are in the map location's time zone.
 - **Slope direction**: drag the two dots on the compass to pick a range of directions, and slopes facing that way are shaded purple. Dragging inside the wedge rotates it, and Invert swaps to the other side. Ground flatter than 5° is left unshaded because it has no meaningful direction.
 - Each of the three has its own on/off checkbox and opacity slider.
 - **Tap or click the map** for a popup with coordinates, elevation, which way the slope faces, and hours of direct sun on the sun-exposure date. The sun hours account for the slope and for terrain up to 30 km away blocking the sun.
@@ -35,7 +35,7 @@ python3 -m http.server 8000
 |---|---|
 | `app.js` | Map setup, panel and overlay wiring |
 | `dem.js` | Fetches and decodes elevation tiles, point sampling |
-| `terrain.js` | WebGL2 shaders for sun exposure (ray-marched shadows) and slope direction (Horn's method, smoothed) |
+| `terrain.js` | WebGL2 shaders for sun exposure (ray-marched shadows, drawn as a shadow veil) and slope direction (Horn's method, smoothed) |
 | `sun.js` | Sun position and sunrise/sunset, adapted from SunCalc |
 | `pointinfo.js` | Tap popup: elevation, slope, facing direction, sun hours with a terrain horizon |
 | `search.js` | Geocoding |
