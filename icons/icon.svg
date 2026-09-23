@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="ramp" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#fecc5c"/>
+      <stop offset="0.5" stop-color="#f03b20"/>
+      <stop offset="1" stop-color="#bd0026"/>
+    </linearGradient>
+    <clipPath id="peak"><path d="M24 440 204 150l74 112 58-72 152 250Z"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#1b2430"/>
+  <circle cx="378" cy="136" r="44" fill="#ffd21f"/>
+  <path d="M24 440 204 150l74 112 58-72 152 250Z" fill="#4a5a6e"/>
+  <g clip-path="url(#peak)">
+    <rect x="0" y="140" width="512" height="152" fill="url(#ramp)"/>
+  </g>
+  <path d="M40 292h432" stroke="#fff" stroke-width="10" stroke-dasharray="22 16" stroke-linecap="round" opacity=".85"/>
+</svg>

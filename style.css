@@ -71,9 +71,11 @@ button.link:disabled { color: var(--muted); cursor: default; }
 
 /* ---------- Left column: search above the tools panel ---------- */
 
+.maplibregl-ctrl-top-right { top: env(safe-area-inset-top); }
+
 #left {
   position: absolute;
-  top: 10px;
+  top: calc(10px + env(safe-area-inset-top));
   left: 10px;
   width: 300px;
   max-height: calc(100% - 50px); /* leave room for the scale bar below */
@@ -191,7 +193,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 
 #layerbar {
   position: absolute;
-  top: 120px;
+  top: calc(120px + env(safe-area-inset-top));
   right: 10px;
   display: flex;
   flex-direction: column;
@@ -256,7 +258,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   #left { display: contents; }
   #searchbox {
     position: absolute;
-    top: 10px;
+    top: calc(10px + env(safe-area-inset-top));
     left: 10px;
     right: 56px; /* clear the zoom buttons */
   }
@@ -271,5 +273,5 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   }
   /* Keep the scale bar and attribution above the bottom sheet. */
   .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: var(--sheet-h); }
-  #layerbar { top: 110px; }
+  #layerbar { top: calc(110px + env(safe-area-inset-top)); }
 }

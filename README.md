@@ -14,6 +14,10 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite. Hillshade has its own strength slider.
 - The URL hash keeps the map position, so views can be bookmarked.
 
+## Install on a phone
+
+The site is an installable web app. In Chrome on Android, open the menu and choose **Install app** (or **Add to Home screen**). On iPhone, use Safari's Share button and **Add to Home Screen**. The app opens full screen at the last place you viewed. The interface opens offline, but map and terrain tiles need a connection.
+
 ## Run locally
 
 No build step. Serve the folder with any static server:
@@ -35,6 +39,7 @@ python3 -m http.server 8000
 | `sun.js` | Sun position and sunrise/sunset, adapted from SunCalc |
 | `pointinfo.js` | Tap popup: elevation, slope, facing direction, sun hours with a terrain horizon |
 | `search.js` | Geocoding |
+| `sw.js`, `manifest.webmanifest`, `icons/` | Installable app: service worker (network-first, offline fallback), manifest and icons |
 
 ## Data
 

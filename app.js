@@ -144,11 +144,20 @@ layers.push(
   { id: 'places', type: 'raster', source: 'places', layout: { visibility: 'none' } },
 );
 
+// Opened without a position in the URL (e.g. from the home-screen icon):
+// start where the map was last left.
+let lastView = null;
+try {
+  lastView = JSON.parse(localStorage.getItem('lastView'));
+} catch {
+  // storage unavailable or empty
+}
+
 const map = new maplibregl.Map({
   container: 'map',
   style: { version: 8, sources, layers },
-  center: [-98.5, 39.5],
-  zoom: 3.6,
+  center: lastView?.center ?? [-98.5, 39.5],
+  zoom: lastView?.zoom ?? 3.6,
   maxZoom: 17,
   dragRotate: false,
   pitchWithRotate: false,
@@ -789,6 +798,12 @@ map.on('click', async (e) => {
 
 let viewTimer;
 map.on('moveend', () => {
+  try {
+    const c = map.getCenter();
+    localStorage.setItem('lastView', JSON.stringify({ center: [c.lng, c.lat], zoom: map.getZoom() }));
+  } catch {
+    // storage unavailable: the view just won't be remembered
+  }
   clearTimeout(viewTimer);
   viewTimer = setTimeout(() => {
     computeViewStats();
@@ -796,6 +811,12 @@ map.on('moveend', () => {
     updateTerrainGrid();
   }, 150);
 });
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {
+    // installability and offline start are optional; the map works without them
+  });
+}
+
 map.on('load', () => {
   // Start with the attribution collapsed to its (i) button so it doesn't cover the map.
   document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
