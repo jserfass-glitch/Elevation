@@ -1,9 +1,10 @@
 // Service worker: makes the app installable and lets the interface open
 // without a connection. App files are network-first, so a new deploy shows up
-// on the next load; the cache is only a fallback when offline. Map and terrain
+// on the next load; the cache is only a fallback when offline or when the
+// host returns a server error. Map and terrain
 // tiles come from other origins and are left to the browser.
 
-const CACHE = 'elevation-app-v1';
+const CACHE = 'elevation-app-v2';
 const APP_FILES = [
   './',
   'index.html',
@@ -36,15 +37,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  const cached = () => caches.match(request, { ignoreSearch: true });
   event.respondWith(
     fetch(request)
-      .then((response) => {
+      .then(async (response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy));
+          return response;
         }
+        // The host sometimes answers with a transient 5xx; a saved copy beats an error page.
+        if (response.status >= 500) return (await cached()) || response;
         return response;
       })
-      .catch(() => caches.match(request, { ignoreSearch: true }).then((hit) => hit || caches.match('./'))),
+      .catch(async () => (await cached()) || caches.match('./')),
   );
 });
