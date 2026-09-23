@@ -308,6 +308,17 @@ function syncSlider() {
   ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
   ui.peak.disabled = false;
   ui.peak.textContent = `Highest in view: ${fmt(state.max)}`;
+  paintThresholdTrack();
+}
+
+// Gray up to the thumb, then the same yellow-to-red ramp the map uses for
+// the shaded range above it.
+function paintThresholdTrack() {
+  const s = ui.threshold;
+  const span = Number(s.max) - Number(s.min);
+  const p = span > 0 ? ((Number(s.value) - Number(s.min)) / span) * 100 : 0;
+  const stops = RAMP.map((c, i) => `${c} ${(p + ((100 - p) * i) / (RAMP.length - 1)).toFixed(2)}%`);
+  s.style.background = `linear-gradient(to right, var(--border) 0 ${p.toFixed(2)}%, ${stops.join(', ')})`;
 }
 
 ui.threshold.addEventListener('input', () => {
@@ -315,6 +326,7 @@ ui.threshold.addEventListener('input', () => {
   const v = Number(ui.threshold.value);
   state.threshold = v <= Number(ui.threshold.min) ? null : fromUnits(v);
   ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
+  paintThresholdTrack();
   updateShading();
 });
 

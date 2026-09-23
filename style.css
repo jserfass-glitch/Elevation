@@ -152,15 +152,38 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 .opacity-row input { width: 150px; }
 #hillshade-strength { accent-color: #555; }
 
-#threshold { width: 100%; accent-color: var(--accent); }
-#threshold-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-
-#ramp {
-  height: 8px;
-  border-radius: 4px;
-  margin: 2px 0 6px;
-  background: linear-gradient(to right, #ffffb2, #fecc5c, #fd8d3c, #f03b20, #bd0026);
+/* The track shows what gets shaded: gray below the thumb, the map's color ramp
+   above it. The background is set from JS as the value changes. */
+#threshold {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 10px;
+  margin: 8px 0 4px;
+  border-radius: 5px;
+  background: var(--border);
 }
+#threshold::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+#threshold::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+#threshold::-moz-range-track, #threshold::-moz-range-progress { background: transparent; }
+#threshold-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .swatch { display: inline-block; width: 22px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-left: 2px; }
 .sun-swatch {
