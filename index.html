@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Elevation Shading</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
@@ -10,110 +10,148 @@
 <body>
   <div id="map"></div>
 
-  <aside id="panel">
-    <header>
-      <h1>Elevation shading</h1>
-      <button id="collapse" type="button" aria-expanded="true" title="Collapse panel">–</button>
-    </header>
+  <!-- Icons, referenced with <use>. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 2 8.5 12 14l10-5.5L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m2 13 10 5.5L22 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shade" viewBox="0 0 24 24"><path d="M9 6 2 20h20l-6-9-3 4.5L9 6Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M6.5 11h2M11 11h2M15.5 11h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 6 6.8 10.4h4.4L9 6Z" fill="currentColor"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-aspect" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 12V3a9 9 0 0 1 6.4 2.6L12 12Z" fill="currentColor"/></symbol>
+    <symbol id="i-hillshade" viewBox="0 0 24 24"><path d="M9 5 2 19h20l-5-8-3 4L9 5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 5l5 10 3-4 5 8H12L9 5Z" fill="currentColor" opacity=".55"/></symbol>
+    <symbol id="i-roads" viewBox="0 0 24 24"><path d="M7 21 10.5 3M17 21 13.5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18.5v2M12 12v2.5M12 6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  </svg>
 
-    <form id="search" role="search" autocomplete="off">
-      <input id="search-input" type="search" placeholder="Address, place, or lat, lng" aria-label="Search for a place"
-        aria-autocomplete="list" aria-controls="search-results" aria-expanded="false">
-      <ul id="search-results" role="listbox" hidden></ul>
-    </form>
-
-    <div id="panel-body">
-      <section id="shade-section" class="on">
-        <div class="row">
-          <label><input type="checkbox" id="ov-shade" checked> <strong>Shade above</strong></label>
-          <output id="threshold-value">–</output>
-        </div>
-        <input id="threshold" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
-        <div class="row small muted">
-          <span id="range-min">–</span>
-          <span id="range-max">–</span>
-        </div>
-        <div id="ramp" aria-hidden="true"></div>
-        <div class="row small">
-          <button id="peak" type="button" class="link" disabled>Highest in view: –</button>
-          <span id="status" class="muted"></span>
-        </div>
-      </section>
-
-      <section id="sun-section">
-        <div class="row">
-          <label><input type="checkbox" id="ov-sun"> <strong>Sun exposure</strong></label>
-          <input id="sun-date" type="date" aria-label="Date">
-        </div>
-        <div class="row">
-          <button id="sun-play" type="button" title="Play through the day" aria-label="Play">▶</button>
-          <input id="sun-time" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
-          <output id="sun-time-value">–</output>
-        </div>
-        <div class="row small muted">
-          <span id="sunrise">–</span>
-          <span id="sunset">–</span>
-        </div>
-        <div id="sun-info" class="small muted"></div>
-      </section>
-
-      <section id="aspect-section">
-        <label><input type="checkbox" id="ov-aspect"> <strong>Slope direction</strong></label>
-        <div class="aspect-row">
-          <svg id="compass" viewBox="-60 -60 120 120" role="group" aria-label="Slope directions to shade">
-            <circle class="dial" r="42"></circle>
-            <path id="aspect-wedge" class="wedge"></path>
-            <g class="ticks">
-              <text x="0" y="-53">N</text><text x="53" y="0">E</text>
-              <text x="0" y="53">S</text><text x="-53" y="0">W</text>
-            </g>
-            <line id="aspect-line-a" class="arm"></line>
-            <line id="aspect-line-b" class="arm"></line>
-            <circle id="aspect-handle-a" class="handle" r="7" tabindex="0" role="slider" aria-label="Start direction"
-              aria-valuemin="0" aria-valuemax="359"></circle>
-            <circle id="aspect-handle-b" class="handle" r="7" tabindex="0" role="slider" aria-label="End direction"
-              aria-valuemin="0" aria-valuemax="359"></circle>
-          </svg>
-          <div class="small">
-            <div id="aspect-label" class="aspect-label">–</div>
-            <p class="muted">Drag the dots to set the range. Drag inside the wedge to rotate it.</p>
-            <button id="aspect-invert" type="button">Invert</button>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <h2>Base map</h2>
-        <div class="choices" role="radiogroup">
-          <label><input type="radio" name="base" value="usgs" checked> USGS Topo</label>
-          <label><input type="radio" name="base" value="opentopo"> OpenTopoMap</label>
-          <label><input type="radio" name="base" value="streets"> Streets</label>
-          <label><input type="radio" name="base" value="imagery"> Satellite</label>
-        </div>
-      </section>
-
-      <section>
-        <h2>Overlays</h2>
-        <div class="choices">
-          <label><input type="checkbox" id="ov-hillshade" checked> Hillshade</label>
-          <label><input type="checkbox" id="ov-roads"> Roads &amp; places</label>
-        </div>
-        <div class="row">
-          <label for="opacity" class="small">Shading opacity</label>
-          <input id="opacity" type="range" min="0.1" max="1" step="0.05" value="0.6">
-        </div>
-        <div class="row">
-          <span class="small">Units</span>
-          <span class="choices inline">
-            <label><input type="radio" name="units" value="ft" checked> ft</label>
-            <label><input type="radio" name="units" value="m"> m</label>
-          </span>
-        </div>
-      </section>
-
-      <p id="cursor" class="small muted">Hover the map for elevation.</p>
+  <div id="left">
+    <div id="searchbox" class="card">
+      <form id="search" role="search" autocomplete="off">
+        <svg class="search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="search-input" type="search" placeholder="Address, place, or lat, lng" aria-label="Search for a place"
+          aria-autocomplete="list" aria-controls="search-results" aria-expanded="false" enterkeyhint="search">
+        <ul id="search-results" role="listbox" hidden></ul>
+      </form>
+      <button id="search-toggle" type="button" class="icon-btn" aria-expanded="true" aria-label="Minimize search" title="Minimize search">
+        <svg aria-hidden="true"><use href="#i-minimize"/></svg>
+      </button>
     </div>
-  </aside>
+
+    <aside id="panel" class="card" aria-label="Shading tools">
+      <header>
+        <h1>Shading tools</h1>
+        <button id="collapse" type="button" class="icon-btn" aria-expanded="true" aria-controls="panel-body" title="Minimize panel">–</button>
+      </header>
+
+      <div id="panel-body">
+        <section id="shade-section" class="feature on">
+          <div class="row">
+            <label><input type="checkbox" id="ov-shade" checked> <strong>Shade above</strong></label>
+            <output id="threshold-value">–</output>
+          </div>
+          <div class="feature-body">
+            <input id="threshold" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
+            <div class="row small muted">
+              <span id="range-min">–</span>
+              <span id="range-max">–</span>
+            </div>
+            <div id="ramp" aria-hidden="true"></div>
+            <div class="row small">
+              <button id="peak" type="button" class="link" disabled>Highest in view: –</button>
+              <span id="status" class="muted"></span>
+            </div>
+            <label class="row small opacity-row">Opacity <input id="op-shade" type="range" min="0.1" max="1" step="0.05" value="0.6"></label>
+          </div>
+        </section>
+
+        <section id="sun-section" class="feature">
+          <div class="row">
+            <label><input type="checkbox" id="ov-sun"> <strong>Sun exposure</strong> <span class="swatch sun-swatch" aria-hidden="true"></span></label>
+            <input id="sun-date" type="date" aria-label="Date">
+          </div>
+          <div class="feature-body">
+            <div class="row">
+              <button id="sun-play" type="button" title="Play through the day" aria-label="Play">▶</button>
+              <input id="sun-time" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
+              <output id="sun-time-value">–</output>
+            </div>
+            <div class="row small muted">
+              <span id="sunrise">–</span>
+              <span id="sunset">–</span>
+            </div>
+            <div id="sun-info" class="small muted"></div>
+            <label class="row small opacity-row">Opacity <input id="op-sun" type="range" min="0.1" max="1" step="0.05" value="0.9"></label>
+          </div>
+        </section>
+
+        <section id="aspect-section" class="feature">
+          <label><input type="checkbox" id="ov-aspect"> <strong>Slope direction</strong> <span class="swatch aspect-swatch" aria-hidden="true"></span></label>
+          <div class="feature-body">
+            <div class="aspect-row">
+              <svg id="compass" viewBox="-60 -60 120 120" role="group" aria-label="Slope directions to shade">
+                <circle class="dial" r="42"></circle>
+                <path id="aspect-wedge" class="wedge"></path>
+                <g class="ticks">
+                  <text x="0" y="-53">N</text><text x="53" y="0">E</text>
+                  <text x="0" y="53">S</text><text x="-53" y="0">W</text>
+                </g>
+                <line id="aspect-line-a" class="arm"></line>
+                <line id="aspect-line-b" class="arm"></line>
+                <circle id="aspect-handle-a" class="handle" r="7" tabindex="0" role="slider" aria-label="Start direction"
+                  aria-valuemin="0" aria-valuemax="359"></circle>
+                <circle id="aspect-handle-b" class="handle" r="7" tabindex="0" role="slider" aria-label="End direction"
+                  aria-valuemin="0" aria-valuemax="359"></circle>
+              </svg>
+              <div class="small">
+                <div id="aspect-label" class="aspect-label">–</div>
+                <p class="muted">Drag the dots to set the range. Drag inside the wedge to rotate it.</p>
+                <button id="aspect-invert" type="button">Invert</button>
+              </div>
+            </div>
+            <label class="row small opacity-row">Opacity <input id="op-aspect" type="range" min="0.1" max="1" step="0.05" value="0.6"></label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Base map</h2>
+          <div class="choices" role="radiogroup">
+            <label><input type="radio" name="base" value="usgs" checked> USGS Topo</label>
+            <label><input type="radio" name="base" value="opentopo"> OpenTopoMap</label>
+            <label><input type="radio" name="base" value="streets"> Streets</label>
+            <label><input type="radio" name="base" value="imagery"> Satellite</label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Overlays</h2>
+          <div class="choices">
+            <label><input type="checkbox" id="ov-hillshade" checked> Hillshade</label>
+            <label><input type="checkbox" id="ov-roads"> Roads &amp; places</label>
+          </div>
+          <label class="row small opacity-row">Hillshade strength <input id="hillshade-strength" type="range" min="0" max="1" step="0.05" value="0.4"></label>
+          <div class="row">
+            <span class="small">Units</span>
+            <span class="choices inline">
+              <label><input type="radio" name="units" value="ft" checked> ft</label>
+              <label><input type="radio" name="units" value="m"> m</label>
+            </span>
+          </div>
+          <p class="small muted">Tap or click the map for elevation, slope, and sun hours at a spot.</p>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <nav id="layerbar" aria-label="Quick overlay toggles">
+    <button id="layerbar-toggle" type="button" class="icon-btn" aria-expanded="false" aria-controls="layerbar-items" title="Overlay toggles">
+      <svg aria-hidden="true"><use href="#i-layers"/></svg>
+    </button>
+    <div id="layerbar-items">
+      <button type="button" class="icon-btn" data-overlay="shade" aria-pressed="true" title="Shade above" aria-label="Shade above"><svg aria-hidden="true"><use href="#i-shade"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="sun" aria-pressed="false" title="Sun exposure" aria-label="Sun exposure"><svg aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="aspect" aria-pressed="false" title="Slope direction" aria-label="Slope direction"><svg aria-hidden="true"><use href="#i-aspect"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="hillshade" aria-pressed="true" title="Hillshade" aria-label="Hillshade"><svg aria-hidden="true"><use href="#i-hillshade"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="roads" aria-pressed="false" title="Roads and places" aria-label="Roads and places"><svg aria-hidden="true"><use href="#i-roads"/></svg></button>
+    </div>
+  </nav>
 
   <script type="module" src="app.js"></script>
 </body>

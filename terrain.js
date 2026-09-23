@@ -49,6 +49,7 @@ vec2 gradient(ivec2 p, float pix) {
 const SUN_FRAGMENT = `${COMMON}
 uniform vec3 uSun;        // unit vector toward the sun: east, north, up
 uniform float uMaxElev;
+uniform float uScreenPx;  // screen pixels per grid pixel, keeps hatching a fixed size on screen
 const int MAX_STEPS = 1500;
 
 void main() {
@@ -76,8 +77,19 @@ void main() {
       if (texelFetch(uDem, ivec2(s), 0).r > h + 1.0) return; // blocked
     }
   }
-  float a = 0.35 + 0.65 * incidence;
-  outColor = vec4(uColor * a, a); // premultiplied
+  // Diagonal hatching so sunlit ground reads clearly on top of other color
+  // overlays: a light tint, then yellow stripes with a dark edge.
+  const float PERIOD = 9.0;   // screen pixels between stripes
+  const float HALF_W = 1.0;   // stripe half-width, screen pixels
+  float u = (float(p.x) + float(p.y)) * 0.70710678 * uScreenPx;
+  float d = abs(mod(u, PERIOD) - 0.5 * PERIOD);
+  float stripe = 1.0 - smoothstep(HALF_W - 0.5, HALF_W + 0.5, d);
+  float edge = (1.0 - smoothstep(HALF_W + 0.5, HALF_W + 1.3, d)) - stripe;
+  float tint = 0.1 + 0.15 * incidence;
+  vec4 c = vec4(uColor * tint, tint);                                 // premultiplied
+  c = vec4(0.28, 0.2, 0.0, 1.0) * edge * 0.9 + c * (1.0 - edge * 0.9);
+  c = vec4(uColor, 1.0) * stripe + c * (1.0 - stripe);
+  outColor = c;
 }`;
 
 const ASPECT_FRAGMENT = `${COMMON}
@@ -85,14 +97,24 @@ uniform float uFrom;      // arc start, radians clockwise from north
 uniform float uSpan;      // arc width clockwise from uFrom, radians
 uniform float uMinSlope;  // tan of the gentlest slope that counts
 
+const float SOFT = 0.07;    // radians (~4°) of fade at each edge of the arc
+
 void main() {
   ivec2 p = gridPixel();
-  outColor = vec4(0.0);
-  vec2 grad = gradient(p, pixelMeters(p));
-  if (length(grad) < uMinSlope) return; // flat ground faces no direction
+  float pix = pixelMeters(p);
+  // Average the gradient over the 3x3 neighborhood to smooth DEM noise.
+  vec2 grad = vec2(0.0);
+  for (int dy = -1; dy <= 1; dy++)
+    for (int dx = -1; dx <= 1; dx++) grad += gradient(p + ivec2(dx, dy), pix);
+  grad /= 9.0;
+
+  float steep = smoothstep(uMinSlope * 0.7, uMinSlope * 1.3, length(grad)); // flat ground faces no direction
   float facing = atan(-grad.x, -grad.y); // downhill direction, clockwise from north
-  if (mod(facing - uFrom, 2.0 * PI) > uSpan) return;
-  float a = 0.85;
+  float rel = mod(facing - uFrom, 2.0 * PI);
+  // Signed angular distance inside the arc (negative outside), faded at the edges.
+  float inside = rel <= uSpan ? min(rel, uSpan - rel) : -min(rel - uSpan, 2.0 * PI - rel);
+  float within = uSpan >= 2.0 * PI - 1e-3 ? 1.0 : smoothstep(-SOFT, SOFT, inside);
+  float a = 0.85 * steep * within;
   outColor = vec4(uColor * a, a); // premultiplied
 }`;
 
@@ -165,7 +187,13 @@ class GridRenderer {
 
 export class SunRenderer extends GridRenderer {
   constructor(canvas) {
-    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev'], [1.0, 0.82, 0.12]);
+    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev', 'uScreenPx'], [1.0, 0.82, 0.12]);
+    this.screenPx = 1;
+  }
+
+  /** Screen pixels per grid pixel at the current map zoom. */
+  setScreenScale(screenPx) {
+    this.screenPx = screenPx;
   }
 
   setGrid(grid) {
@@ -179,6 +207,7 @@ export class SunRenderer extends GridRenderer {
     const gl = this.gl;
     const c = Math.cos(altitude);
     gl.uniform3f(this.u.uSun, Math.sin(azimuth) * c, Math.cos(azimuth) * c, Math.sin(altitude));
+    gl.uniform1f(this.u.uScreenPx, this.screenPx);
     this.draw();
   }
 }

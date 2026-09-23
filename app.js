@@ -1,17 +1,24 @@
 import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
+import { DEM_URL, DEM_MAX_ZOOM, DEM_TILE_SIZE, loadTile, lngToX, latToY, xToLng, yToLat, wrapX } from './dem.js';
 import { sunPosition, sunTimes } from './sun.js';
 import { SunRenderer, AspectRenderer } from './terrain.js';
+import { initSearch } from './search.js';
+import { pointInfo } from './pointinfo.js';
 
-// Time zone of the map location, so the time slider reads in local time there.
+// Time zone of a map location, so times read in local time there.
 const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
   .then((m) => m.default)
   .catch(() => null);
+const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+async function timeZoneAt(lat, lng) {
+  const lookup = await tzLookup;
+  try {
+    return lookup ? lookup(lat, lng) : browserTz;
+  } catch {
+    return browserTz; // outside any zone polygon, e.g. open ocean
+  }
+}
 
-// AWS Open Data terrain tiles (Terrarium encoding): elevation in meters =
-// R * 256 + G + B / 256 - 32768.
-const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
-const DEM_MAX_ZOOM = 15;
-const DEM_TILE_SIZE = 256;
 const M_TO_FT = 3.28084;
 
 // Low-to-high ramp applied from the threshold up to the highest point in view.
@@ -55,13 +62,11 @@ const ui = {
   rangeMax: $('range-max'),
   peak: $('peak'),
   status: $('status'),
-  opacity: $('opacity'),
   shade: $('ov-shade'),
   hillshade: $('ov-hillshade'),
+  hillshadeStrength: $('hillshade-strength'),
   roads: $('ov-roads'),
-  cursor: $('cursor'),
   sun: $('ov-sun'),
-  sunSection: $('sun-section'),
   sunDate: $('sun-date'),
   sunTime: $('sun-time'),
   sunTimeValue: $('sun-time-value'),
@@ -70,7 +75,7 @@ const ui = {
   sunset: $('sunset'),
   sunInfo: $('sun-info'),
   aspect: $('ov-aspect'),
-  aspectSection: $('aspect-section'),
+  opacity: { shade: $('op-shade'), sun: $('op-sun'), aspect: $('op-aspect') },
 };
 
 const state = {
@@ -79,10 +84,17 @@ const state = {
   max: null, // meters, highest point in view
   peak: null, // [lng, lat] of the highest point in view
   threshold: null, // meters; null means "at minimum", shade everything
-  statsZoom: 0,
 };
 
 // ---------- Map ----------
+
+// Hillshade strength 0..1 -> paint properties; the top of the range is
+// noticeably darker and higher-contrast than MapLibre's default.
+const hillshadePaint = (v) => ({
+  'hillshade-exaggeration': 0.15 + 0.7 * v,
+  'hillshade-shadow-color': `rgba(0, 0, 0, ${(0.3 + 0.6 * v).toFixed(2)})`,
+  'hillshade-highlight-color': `rgba(255, 255, 255, ${(0.1 + 0.3 * v).toFixed(2)})`,
+});
 
 const sources = {
   dem: {
@@ -111,33 +123,23 @@ for (const [id, b] of Object.entries(BASEMAPS)) {
   sources[`base-${id}`] = { type: 'raster', tiles: b.tiles, tileSize: 256, maxzoom: b.maxzoom, attribution: b.attribution };
   layers.push({ id: `base-${id}`, type: 'raster', source: `base-${id}`, layout: { visibility: id === 'usgs' ? 'visible' : 'none' } });
 }
+const canvasLayer = (id) => ({
+  id,
+  type: 'raster',
+  source: id,
+  layout: { visibility: 'none' },
+  paint: { 'raster-opacity': Number(ui.opacity[id].value), 'raster-fade-duration': 0 },
+});
 layers.push(
-  {
-    id: 'hillshade',
-    type: 'hillshade',
-    source: 'dem',
-    paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#3a3a3a' },
-  },
+  { id: 'hillshade', type: 'hillshade', source: 'dem', paint: hillshadePaint(Number(ui.hillshadeStrength.value)) },
   {
     id: 'elevation-shading',
     type: 'color-relief',
     source: 'dem',
-    paint: { 'color-relief-opacity': Number(ui.opacity.value), 'color-relief-color': reliefExpression() },
+    paint: { 'color-relief-opacity': Number(ui.opacity.shade.value), 'color-relief-color': reliefExpression() },
   },
-  {
-    id: 'aspect',
-    type: 'raster',
-    source: 'aspect',
-    layout: { visibility: 'none' },
-    paint: { 'raster-opacity': Number(ui.opacity.value), 'raster-fade-duration': 0 },
-  },
-  {
-    id: 'sun',
-    type: 'raster',
-    source: 'sun',
-    layout: { visibility: 'none' },
-    paint: { 'raster-opacity': Number(ui.opacity.value), 'raster-fade-duration': 0 },
-  },
+  canvasLayer('aspect'),
+  canvasLayer('sun'),
   { id: 'roads', type: 'raster', source: 'roads', layout: { visibility: 'none' } },
   { id: 'places', type: 'raster', source: 'places', layout: { visibility: 'none' } },
 );
@@ -152,13 +154,18 @@ const map = new maplibregl.Map({
   pitchWithRotate: false,
   touchPitch: false,
   hash: true,
+  attributionControl: { compact: true },
 });
 map.touchZoomRotate.disableRotation();
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
-map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
+map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
 
-const peakMarker = new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'peak-marker', title: 'Highest point in view' }) });
+const marker = (className, title) => new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className, title }) });
+const peakMarker = marker('peak-marker', 'Highest point in view');
+const placeMarker = marker('place-marker', 'Search result');
+
+const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
 
 // ---------- Elevation shading ----------
 
@@ -198,49 +205,7 @@ function updateShading() {
 // MapLibre does not expose decoded DEM data, so we fetch the same terrain tiles
 // at a coarser zoom and scan the pixels inside the current view.
 
-const tileCache = new Map(); // key "z/x/y" -> Promise<Float32Array|null>
-const TILE_CACHE_LIMIT = 150;
 const MAX_STATS_TILES = 16;
-
-function loadTile(z, x, y) {
-  const key = `${z}/${x}/${y}`;
-  let entry = tileCache.get(key);
-  if (entry) {
-    tileCache.delete(key); // refresh LRU position
-    tileCache.set(key, entry);
-    return entry;
-  }
-  entry = fetch(DEM_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y))
-    .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(r.status))))
-    .then((blob) => createImageBitmap(blob))
-    .then((bmp) => {
-      const canvas = new OffscreenCanvas(DEM_TILE_SIZE, DEM_TILE_SIZE);
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(bmp, 0, 0);
-      const px = ctx.getImageData(0, 0, DEM_TILE_SIZE, DEM_TILE_SIZE).data;
-      const elev = new Float32Array(DEM_TILE_SIZE * DEM_TILE_SIZE);
-      for (let i = 0; i < elev.length; i++) {
-        elev[i] = px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256 - 32768;
-      }
-      return elev;
-    })
-    .catch(() => {
-      tileCache.delete(key);
-      return null;
-    });
-  tileCache.set(key, entry);
-  while (tileCache.size > TILE_CACHE_LIMIT) tileCache.delete(tileCache.keys().next().value);
-  return entry;
-}
-
-const MAX_LAT = 85.0511;
-const lngToX = (lng, n) => ((lng + 180) / 360) * n;
-function latToY(lat, n) {
-  const r = (Math.max(-MAX_LAT, Math.min(MAX_LAT, lat)) * Math.PI) / 180;
-  return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n;
-}
-const xToLng = (x, n) => (x / n) * 360 - 180;
-const yToLat = (y, n) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
 
 function viewTileRange(z) {
   const b = map.getBounds();
@@ -267,8 +232,7 @@ async function computeViewStats() {
   const jobs = [];
   for (let ty = r.y0; ty <= r.y1; ty++) {
     for (let tx = r.x0; tx <= r.x1; tx++) {
-      const wx = ((tx % r.n) + r.n) % r.n; // wrap across the antimeridian
-      jobs.push(loadTile(z, wx, ty).then((elev) => ({ tx, ty, elev })));
+      jobs.push(loadTile(z, wrapX(tx, r.n), ty).then((elev) => ({ tx, ty, elev })));
     }
   }
   const tiles = await Promise.all(jobs);
@@ -302,7 +266,6 @@ async function computeViewStats() {
     return;
   }
 
-  state.statsZoom = z;
   state.min = min;
   state.max = max;
   state.peak = [xToLng(peak[0], r.n), yToLat(peak[1], r.n)];
@@ -315,8 +278,6 @@ async function computeViewStats() {
   peakMarker.setLngLat(state.peak);
   if (ui.shade.checked) peakMarker.addTo(map);
 }
-
-// ---------- UI ----------
 
 const toUnits = (m) => (state.units === 'ft' ? m * M_TO_FT : m);
 const fromUnits = (v) => (state.units === 'ft' ? v / M_TO_FT : v);
@@ -341,7 +302,7 @@ function syncSlider() {
 }
 
 ui.threshold.addEventListener('input', () => {
-  if (!ui.shade.checked) setShadeEnabled(true);
+  if (!ui.shade.checked) overlays.shade.set(true);
   const v = Number(ui.threshold.value);
   state.threshold = v <= Number(ui.threshold.min) ? null : fromUnits(v);
   ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
@@ -352,78 +313,10 @@ ui.peak.addEventListener('click', () => {
   if (state.peak) map.flyTo({ center: state.peak, zoom: Math.max(map.getZoom(), 12) });
 });
 
-ui.opacity.addEventListener('input', () => {
-  map.setPaintProperty('elevation-shading', 'color-relief-opacity', Number(ui.opacity.value));
-  map.setPaintProperty('sun', 'raster-opacity', Number(ui.opacity.value));
-  map.setPaintProperty('aspect', 'raster-opacity', Number(ui.opacity.value));
-});
-
-const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
-function setShadeEnabled(on) {
-  ui.shade.checked = on;
-  $('shade-section').classList.toggle('on', on);
-  setVisible('elevation-shading', on);
-  if (on && state.peak) peakMarker.addTo(map);
-  else peakMarker.remove();
-}
-ui.shade.addEventListener('change', () => setShadeEnabled(ui.shade.checked));
-ui.hillshade.addEventListener('change', () => setVisible('hillshade', ui.hillshade.checked));
-ui.roads.addEventListener('change', () => {
-  setVisible('roads', ui.roads.checked);
-  setVisible('places', ui.roads.checked);
-});
-
-document.querySelectorAll('input[name=base]').forEach((el) =>
-  el.addEventListener('change', () => {
-    for (const id of Object.keys(BASEMAPS)) setVisible(`base-${id}`, id === el.value);
-  }),
-);
-
-document.querySelectorAll('input[name=units]').forEach((el) =>
-  el.addEventListener('change', () => {
-    state.units = el.value;
-    syncSlider();
-    showCursor(lastCursor);
-  }),
-);
-
-ui.collapse.addEventListener('click', () => {
-  const collapsed = ui.panel.classList.toggle('collapsed');
-  ui.collapse.textContent = collapsed ? '+' : '–';
-  ui.collapse.setAttribute('aria-expanded', String(!collapsed));
-});
-
-// Elevation under the cursor, read from the tiles already fetched for the stats.
-let lastCursor = null;
-async function showCursor(lngLat) {
-  lastCursor = lngLat;
-  if (!lngLat) return;
-  const z = state.statsZoom;
-  const n = 2 ** z;
-  const fx = lngToX(lngLat.lng, n);
-  const fy = latToY(lngLat.lat, n);
-  const tx = Math.floor(fx);
-  const ty = Math.floor(fy);
-  const key = `${z}/${((tx % n) + n) % n}/${ty}`;
-  const entry = tileCache.get(key);
-  const elev = entry && (await entry);
-  if (lastCursor !== lngLat) return;
-  if (!elev) {
-    ui.cursor.textContent = 'Hover the map for elevation.';
-    return;
-  }
-  const px = Math.min(DEM_TILE_SIZE - 1, Math.floor((fx - tx) * DEM_TILE_SIZE));
-  const py = Math.min(DEM_TILE_SIZE - 1, Math.floor((fy - ty) * DEM_TILE_SIZE));
-  const e = elev[py * DEM_TILE_SIZE + px];
-  ui.cursor.textContent = `Cursor: ${fmt(e)}  (${lngLat.lat.toFixed(4)}, ${lngLat.lng.toFixed(4)})`;
-}
-map.on('mousemove', (e) => showCursor(e.lngLat));
-map.on('click', (e) => showCursor(e.lngLat));
-
 // ---------- Sun exposure ----------
 
 const sun = {
-  tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  tz: browserTz,
   lat: 0,
   lng: 0,
   times: null,
@@ -434,8 +327,8 @@ const MIN_MS = 60000;
 const MARGIN_MS = 20 * MIN_MS; // slider starts this long before sunrise and ends after sunset
 const renderers = { sun: null, aspect: null };
 
-const formatTime = (ms, withZone = false) =>
-  new Intl.DateTimeFormat([], { timeZone: sun.tz, hour: 'numeric', minute: '2-digit', ...(withZone && { timeZoneName: 'short' }) })
+const formatTime = (ms, tz, withZone = false) =>
+  new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit', ...(withZone && { timeZoneName: 'short' }) })
     .format(new Date(ms));
 const todayIn = (tz) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -444,12 +337,7 @@ const todayIn = (tz) =>
 // the slider at the same offset from solar noon.
 async function updateSunRange() {
   const c = map.getCenter();
-  const lookup = await tzLookup;
-  try {
-    if (lookup) sun.tz = lookup(c.lat, c.lng);
-  } catch {
-    // outside any zone polygon: keep the previous zone
-  }
+  sun.tz = await timeZoneAt(c.lat, c.lng);
   if (!ui.sunDate.value) ui.sunDate.value = todayIn(sun.tz);
   const [y, m, d] = ui.sunDate.value.split('-').map(Number);
   // Roughly local noon on the chosen date, so the lookup lands on that solar day.
@@ -477,20 +365,22 @@ async function updateSunRange() {
     ui.sunrise.textContent = times.polar === 'day' ? 'Sun up all day' : 'Sun down all day';
     ui.sunset.textContent = '';
   } else {
-    ui.sunrise.textContent = `Sunrise ${formatTime(times.sunrise)}`;
-    ui.sunset.textContent = `Sunset ${formatTime(times.sunset)}`;
+    ui.sunrise.textContent = `Sunrise ${formatTime(times.sunrise, sun.tz)}`;
+    ui.sunset.textContent = `Sunset ${formatTime(times.sunset, sun.tz)}`;
   }
   drawSun();
 }
 
 function drawSun() {
-  ui.sunTimeValue.textContent = formatTime(sun.time, true);
+  ui.sunTimeValue.textContent = formatTime(sun.time, sun.tz, true);
   const { azimuth, altitude } = sunPosition(new Date(sun.time), sun.lat, sun.lng);
   const deg = (r) => Math.round((r * 180) / Math.PI);
   const az = (deg(azimuth) + 360) % 360;
   const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
   ui.sunInfo.textContent = altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon';
-  if (!ui.sun.checked || !renderers.sun) return;
+  if (!ui.sun.checked || !renderers.sun?.grid) return;
+  // MapLibre draws 512 px per world tile at zoom 0; the grid has 256 px per tile at its zoom.
+  renderers.sun.setScreenScale(2 ** (map.getZoom() - renderers.sun.grid.z + 1));
   renderers.sun.render(azimuth, altitude);
   refreshCanvasSource('sun');
 }
@@ -503,7 +393,6 @@ function refreshCanvasSource(id) {
 }
 
 const RENDERER_CLASSES = { sun: SunRenderer, aspect: AspectRenderer };
-const overlayOn = { sun: () => ui.sun.checked, aspect: () => ui.aspect.checked };
 function ensureRenderer(id) {
   if (!renderers[id]) {
     try {
@@ -519,7 +408,7 @@ function ensureRenderer(id) {
 // the view still cast shadows into it, and hands it to the enabled overlays.
 let gridRun = 0;
 async function updateTerrainGrid() {
-  const ids = Object.keys(overlayOn).filter((id) => overlayOn[id]() && ensureRenderer(id));
+  const ids = ['sun', 'aspect'].filter((id) => ui[id].checked && ensureRenderer(id));
   if (!ids.length) return;
   const run = ++gridRun;
   const MAX_SIDE = 7; // tiles per side including margin, 1792 px
@@ -541,8 +430,7 @@ async function updateTerrainGrid() {
   const jobs = [];
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
-      const tx = gx0 + i;
-      jobs.push(loadTile(z, ((tx % r.n) + r.n) % r.n, gy0 + j).then((elev) => ({ i, j, elev })));
+      jobs.push(loadTile(z, wrapX(gx0 + i, r.n), gy0 + j).then((elev) => ({ i, j, elev })));
     }
   }
   const tiles = await Promise.all(jobs);
@@ -573,25 +461,15 @@ async function updateTerrainGrid() {
   if (ids.includes('aspect')) drawAspect();
 }
 
-function setSunEnabled(on) {
-  ui.sun.checked = on;
-  ui.sunSection.classList.toggle('on', on);
-  setVisible('sun', on);
-  if (on) updateTerrainGrid();
-  else stopPlay();
-}
-
-ui.sun.addEventListener('change', () => setSunEnabled(ui.sun.checked));
-
 ui.sunTime.addEventListener('input', () => {
-  if (!ui.sun.checked) setSunEnabled(true);
+  if (!ui.sun.checked) overlays.sun.set(true);
   sun.time = Number(ui.sunTime.value) * MIN_MS;
   drawSun();
 });
 
 ui.sunDate.addEventListener('change', () => {
   if (!ui.sunDate.value) ui.sunDate.value = todayIn(sun.tz);
-  if (!ui.sun.checked) setSunEnabled(true);
+  if (!ui.sun.checked) overlays.sun.set(true);
   updateSunRange();
 });
 
@@ -603,7 +481,7 @@ function stopPlay() {
 }
 ui.sunPlay.addEventListener('click', () => {
   if (sun.playTimer) return stopPlay();
-  if (!ui.sun.checked) setSunEnabled(true);
+  if (!ui.sun.checked) overlays.sun.set(true);
   const s = ui.sunTime;
   if (Number(s.value) >= Number(s.max)) s.value = s.min;
   ui.sunPlay.textContent = '❚❚';
@@ -665,14 +543,6 @@ function drawAspect() {
   refreshCanvasSource('aspect');
 }
 
-function setAspectEnabled(on) {
-  ui.aspect.checked = on;
-  ui.aspectSection.classList.toggle('on', on);
-  setVisible('aspect', on);
-  if (on) updateTerrainGrid();
-}
-ui.aspect.addEventListener('change', () => setAspectEnabled(ui.aspect.checked));
-
 // Compass bearing of a pointer position relative to the dial center.
 function pointerBearing(e) {
   const box = compass.getBoundingClientRect();
@@ -690,7 +560,7 @@ compass.addEventListener('pointerdown', (e) => {
   else return;
   e.preventDefault();
   compass.setPointerCapture(e.pointerId);
-  if (!ui.aspect.checked) setAspectEnabled(true);
+  if (!ui.aspect.checked) overlays.aspect.set(true);
 });
 compass.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -713,7 +583,7 @@ for (const [key, prop] of [['a', 'from'], ['b', 'to']]) {
     const step = { ArrowRight: 5, ArrowUp: 5, ArrowLeft: -5, ArrowDown: -5 }[e.key];
     if (!step) return;
     e.preventDefault();
-    if (!ui.aspect.checked) setAspectEnabled(true);
+    if (!ui.aspect.checked) overlays.aspect.set(true);
     aspect[prop] = norm(aspect[prop] + step);
     drawAspect();
   });
@@ -721,156 +591,214 @@ for (const [key, prop] of [['a', 'from'], ['b', 'to']]) {
 
 $('aspect-invert').addEventListener('click', () => {
   [aspect.from, aspect.to] = [aspect.to, aspect.from];
-  if (!ui.aspect.checked) setAspectEnabled(true);
+  if (!ui.aspect.checked) overlays.aspect.set(true);
   drawAspect();
 });
 
 drawCompass();
 
-// ---------- Place search ----------
-// Photon (https://photon.komoot.io) is an OpenStreetMap geocoder built for
-// search-as-you-type, free and keyless under a fair-use policy.
+// ---------- Overlay toggles ----------
+// Each overlay has a checkbox in the panel and a button in the slide-out bar;
+// both go through set() so they stay in sync.
 
-const PHOTON_URL = 'https://photon.komoot.io/api/';
-const searchInput = $('search-input');
-const searchResults = $('search-results');
-const placeMarker = new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'place-marker' }) });
-let results = [];
-let selected = -1;
-let searchTimer;
-let searchAbort;
-let resultsQuery = null; // the query `results` belong to
+const layerButtons = Object.fromEntries([...document.querySelectorAll('#layerbar-items [data-overlay]')].map((b) => [b.dataset.overlay, b]));
 
-// Accepts "39.1175, -106.4453" style coordinates directly.
-function parseLatLng(q) {
-  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if (!m) return null;
-  const lat = Number(m[1]);
-  const lng = Number(m[2]);
-  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+const overlays = {
+  shade: {
+    input: ui.shade,
+    apply(on) {
+      setVisible('elevation-shading', on);
+      if (on && state.peak) peakMarker.addTo(map);
+      else peakMarker.remove();
+    },
+  },
+  sun: {
+    input: ui.sun,
+    apply(on) {
+      setVisible('sun', on);
+      if (on) updateTerrainGrid();
+      else stopPlay();
+    },
+  },
+  aspect: {
+    input: ui.aspect,
+    apply(on) {
+      setVisible('aspect', on);
+      if (on) updateTerrainGrid();
+    },
+  },
+  hillshade: { input: ui.hillshade, apply: (on) => setVisible('hillshade', on) },
+  roads: {
+    input: ui.roads,
+    apply(on) {
+      setVisible('roads', on);
+      setVisible('places', on);
+    },
+  },
+};
+for (const [id, o] of Object.entries(overlays)) {
+  o.set = (on) => {
+    o.input.checked = on;
+    o.input.closest('.feature')?.classList.toggle('on', on);
+    layerButtons[id].setAttribute('aria-pressed', String(on));
+    o.apply(on);
+  };
+  o.input.addEventListener('change', () => o.set(o.input.checked));
+  layerButtons[id].addEventListener('click', () => o.set(!o.input.checked));
 }
 
-function describe(p) {
-  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
-  const title = p.name || street || p.city || p.county || p.state || 'Unnamed place';
-  const sub = [p.name && street, p.city !== title && p.city, p.state, p.countrycode !== 'US' && p.country]
-    .filter(Boolean)
-    .join(', ');
-  return { title, sub };
-}
-
-async function search(q) {
-  searchAbort?.abort();
-  searchAbort = new AbortController();
-  const c = map.getCenter();
-  const params = new URLSearchParams({ q, limit: '6', lang: 'en', lat: c.lat.toFixed(3), lon: c.lng.toFixed(3) });
+const layerbar = $('layerbar');
+const layerbarToggle = $('layerbar-toggle');
+function setLayerbarOpen(open) {
+  layerbar.classList.toggle('open', open);
+  layerbarToggle.setAttribute('aria-expanded', String(open));
   try {
-    const r = await fetch(`${PHOTON_URL}?${params}`, { signal: searchAbort.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    resultsQuery = q;
-    showResults(
-      data.features.map((f) => ({
-        ...describe(f.properties),
-        center: f.geometry.coordinates,
-        extent: f.properties.extent, // [west, north, east, south]
-        precise: ['house', 'street'].includes(f.properties.type),
-      })),
-    );
-  } catch (e) {
-    if (e.name !== 'AbortError') showResults([], 'Search is unavailable right now');
+    localStorage.setItem('layerbarOpen', open ? '1' : '0');
+  } catch {
+    // storage unavailable: the choice just won't persist
   }
 }
-
-function showResults(list, emptyText = 'No matches') {
-  results = list;
-  selected = list.length ? 0 : -1;
-  searchResults.replaceChildren(
-    ...(list.length ? list : [{ title: emptyText }]).map((res, i) => {
-      const li = document.createElement('li');
-      li.setAttribute('role', 'option');
-      li.textContent = res.title;
-      if (res.sub) li.append(Object.assign(document.createElement('span'), { className: 'sub', textContent: res.sub }));
-      if (list.length) li.addEventListener('mousedown', (e) => (e.preventDefault(), goTo(results[i])));
-      return li;
-    }),
-  );
-  highlight();
-  searchResults.hidden = false;
-  searchInput.setAttribute('aria-expanded', 'true');
-}
-
-function hideResults() {
-  searchResults.hidden = true;
-  searchInput.setAttribute('aria-expanded', 'false');
-}
-
-function highlight() {
-  [...searchResults.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === selected)));
-}
-
-function goTo(res) {
-  hideResults();
-  searchInput.value = res.sub ? `${res.title}, ${res.sub}` : res.title;
-  placeMarker.setLngLat(res.center).addTo(map);
-  const [w, n, e, s] = res.extent || [];
-  if (res.extent && !res.precise && (e - w > 0.01 || n - s > 0.01)) {
-    map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 14 });
-  } else {
-    map.flyTo({ center: res.center, zoom: res.precise ? 15 : 13 });
+layerbarToggle.addEventListener('click', () => setLayerbarOpen(!layerbar.classList.contains('open')));
+{
+  let saved = null;
+  try {
+    saved = localStorage.getItem('layerbarOpen');
+  } catch {
+    // ignore
   }
+  setLayerbarOpen(saved == null ? true : saved === '1');
 }
 
-searchInput.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  const q = searchInput.value.trim();
-  const ll = parseLatLng(q);
-  if (ll) {
-    resultsQuery = q;
-    return showResults([{ title: `${ll.lat}, ${ll.lng}`, center: [ll.lng, ll.lat], precise: true }]);
+// ---------- Opacity and hillshade strength ----------
+
+const OPACITY_PROPS = { shade: ['elevation-shading', 'color-relief-opacity'], sun: ['sun', 'raster-opacity'], aspect: ['aspect', 'raster-opacity'] };
+for (const [id, input] of Object.entries(ui.opacity)) {
+  input.addEventListener('input', () => {
+    map.setPaintProperty(...OPACITY_PROPS[id], Number(input.value));
+    if (!overlays[id].input.checked) overlays[id].set(true);
+  });
+}
+ui.hillshadeStrength.addEventListener('input', () => {
+  for (const [prop, value] of Object.entries(hillshadePaint(Number(ui.hillshadeStrength.value)))) {
+    map.setPaintProperty('hillshade', prop, value);
   }
-  if (q.length < 3) return hideResults();
-  searchTimer = setTimeout(() => search(q), 250);
+  if (!ui.hillshade.checked) overlays.hillshade.set(true);
 });
 
-searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    if (!results.length) return;
-    e.preventDefault();
-    selected = (selected + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length;
-    highlight();
-  } else if (e.key === 'Escape') {
-    hideResults();
-  }
+// ---------- Panel, units, base map ----------
+
+document.querySelectorAll('input[name=base]').forEach((el) =>
+  el.addEventListener('change', () => {
+    for (const id of Object.keys(BASEMAPS)) setVisible(`base-${id}`, id === el.value);
+  }),
+);
+
+document.querySelectorAll('input[name=units]').forEach((el) =>
+  el.addEventListener('change', () => {
+    state.units = el.value;
+    syncSlider();
+  }),
+);
+
+ui.collapse.addEventListener('click', () => {
+  const collapsed = ui.panel.classList.toggle('collapsed');
+  ui.collapse.textContent = collapsed ? '+' : '–';
+  ui.collapse.title = collapsed ? 'Expand panel' : 'Minimize panel';
+  ui.collapse.setAttribute('aria-expanded', String(!collapsed));
 });
 
-$('search').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const q = searchInput.value.trim();
-  if (!q) return;
-  if (resultsQuery !== q || !results.length) {
-    clearTimeout(searchTimer);
-    const ll = parseLatLng(q);
-    if (ll) return goTo({ title: q, center: [ll.lng, ll.lat], precise: true });
-    await search(q);
-  }
-  if (results[selected]) goTo(results[selected]);
+// On phones the panel is a bottom sheet; lift the scale bar and attribution above it.
+const phone = window.matchMedia('(max-width: 600px)');
+new ResizeObserver(() => {
+  const h = phone.matches ? ui.panel.offsetHeight + 10 : 0;
+  document.documentElement.style.setProperty('--sheet-h', `${h}px`);
+}).observe(ui.panel);
+
+// ---------- Search ----------
+
+const searchbox = $('searchbox');
+const searchToggle = $('search-toggle');
+function setSearchOpen(open) {
+  searchbox.classList.toggle('collapsed', !open);
+  searchToggle.setAttribute('aria-expanded', String(open));
+  searchToggle.setAttribute('aria-label', open ? 'Minimize search' : 'Search for a place');
+  searchToggle.title = searchToggle.getAttribute('aria-label');
+  searchToggle.querySelector('use').setAttribute('href', open ? '#i-minimize' : '#i-search');
+  if (open) $('search-input').focus();
+}
+searchToggle.addEventListener('click', () => setSearchOpen(searchbox.classList.contains('collapsed')));
+
+initSearch({
+  form: $('search'),
+  input: $('search-input'),
+  list: $('search-results'),
+  getCenter: () => map.getCenter(),
+  onPick(res) {
+    placeMarker.setLngLat(res.center).addTo(map);
+    const [w, n, e, s] = res.extent || [];
+    if (res.extent && !res.precise && (e - w > 0.01 || n - s > 0.01)) {
+      map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 14 });
+    } else {
+      map.flyTo({ center: res.center, zoom: res.precise ? 15 : 13 });
+    }
+  },
 });
 
-searchInput.addEventListener('blur', hideResults);
+// ---------- Tap for point details ----------
+
+const popup = new maplibregl.Popup({ maxWidth: '260px', focusAfterOpen: false });
+let infoRun = 0;
+
+map.on('click', async (e) => {
+  const run = ++infoRun;
+  const { lng, lat } = e.lngLat.wrap();
+  const date = ui.sunDate.value || todayIn(browserTz);
+  const box = document.createElement('div');
+  box.className = 'info';
+  box.innerHTML = `<div class="info-coords"></div><dl>
+    <dt>Elevation</dt><dd data-k="elev">…</dd>
+    <dt>Slope faces</dt><dd data-k="facing">…</dd>
+    <dt>Direct sun</dt><dd data-k="sun">…</dd></dl>`;
+  box.querySelector('.info-coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  const set = (k, text, sub) => {
+    const dd = box.querySelector(`[data-k="${k}"]`);
+    dd.textContent = text;
+    if (sub) dd.append(Object.assign(document.createElement('span'), { className: 'sub', textContent: sub }));
+  };
+  popup.setLngLat(e.lngLat).setDOMContent(box).addTo(map);
+
+  try {
+    const [info, tz] = await Promise.all([pointInfo(lng, lat, date), timeZoneAt(lat, lng)]);
+    if (run !== infoRun) return;
+    set('elev', fmt(info.elevation));
+    set('facing', info.facing ? info.facing.name : 'N/A (flat)', info.facing ? `${Math.round(info.slope)}° slope, facing ${info.facing.deg}°` : 'under 5° slope');
+    const [y, m, d] = date.split('-').map(Number);
+    const day = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const { minutes, first, last, polar: p } = info.sun;
+    const hours = `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+    if (p === 'night') set('sun', 'None', `Sun stays down on ${day}`);
+    else if (!minutes) set('sun', '0 h', `Terrain shades this spot all day on ${day}`);
+    else set('sun', hours, `on ${day}, ${formatTime(first, tz)} – ${formatTime(last, tz)}`);
+  } catch {
+    if (run !== infoRun) return;
+    for (const k of ['elev', 'facing', 'sun']) set(k, 'Unavailable');
+  }
+});
 
 // ---------- View changes ----------
 
-let statsTimer;
+let viewTimer;
 map.on('moveend', () => {
-  clearTimeout(statsTimer);
-  statsTimer = setTimeout(() => {
+  clearTimeout(viewTimer);
+  viewTimer = setTimeout(() => {
     computeViewStats();
     updateSunRange();
     updateTerrainGrid();
   }, 150);
 });
 map.on('load', () => {
+  // Start with the attribution collapsed to its (i) button so it doesn't cover the map.
+  document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
   computeViewStats();
   updateSunRange();
 });
