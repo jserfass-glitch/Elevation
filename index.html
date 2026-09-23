@@ -57,6 +57,31 @@
         <div id="sun-info" class="small muted"></div>
       </section>
 
+      <section id="aspect-section">
+        <label><input type="checkbox" id="ov-aspect"> <strong>Slope direction</strong></label>
+        <div class="aspect-row">
+          <svg id="compass" viewBox="-60 -60 120 120" role="group" aria-label="Slope directions to shade">
+            <circle class="dial" r="42"></circle>
+            <path id="aspect-wedge" class="wedge"></path>
+            <g class="ticks">
+              <text x="0" y="-53">N</text><text x="53" y="0">E</text>
+              <text x="0" y="53">S</text><text x="-53" y="0">W</text>
+            </g>
+            <line id="aspect-line-a" class="arm"></line>
+            <line id="aspect-line-b" class="arm"></line>
+            <circle id="aspect-handle-a" class="handle" r="7" tabindex="0" role="slider" aria-label="Start direction"
+              aria-valuemin="0" aria-valuemax="359"></circle>
+            <circle id="aspect-handle-b" class="handle" r="7" tabindex="0" role="slider" aria-label="End direction"
+              aria-valuemin="0" aria-valuemax="359"></circle>
+          </svg>
+          <div class="small">
+            <div id="aspect-label" class="aspect-label">–</div>
+            <p class="muted">Drag the dots to set the range. Drag inside the wedge to rotate it.</p>
+            <button id="aspect-invert" type="button">Invert</button>
+          </div>
+        </div>
+      </section>
+
       <section>
         <h2>Base map</h2>
         <div class="choices" role="radiogroup">

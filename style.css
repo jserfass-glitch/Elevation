@@ -117,6 +117,18 @@ button.link:disabled { color: var(--muted); cursor: default; }
 #search-results li[aria-selected="true"], #search-results li:hover { background: rgba(127, 127, 127, 0.18); }
 #search-results .sub { display: block; font-size: 12px; color: var(--muted); }
 
+.aspect-row { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+#compass { width: 120px; height: 120px; flex: none; touch-action: none; user-select: none; }
+#compass .dial { fill: none; stroke: var(--border); stroke-width: 1.5; }
+#compass .wedge { fill: rgba(107, 64, 242, 0.45); stroke: none; cursor: grab; }
+#compass .arm { stroke: #6b40f2; stroke-width: 2; }
+#compass .handle { fill: #6b40f2; stroke: #fff; stroke-width: 2; cursor: grab; }
+#compass .handle:focus-visible { outline: none; stroke: var(--fg); }
+#compass .ticks text { fill: var(--muted); font-size: 10px; text-anchor: middle; dominant-baseline: central; }
+.aspect-label { font-weight: 600; font-size: 13px; }
+.aspect-row p { margin: 4px 0 6px; }
+#aspect-section:not(.on) .aspect-row { opacity: 0.5; }
+
 .place-marker {
   width: 12px;
   height: 12px;

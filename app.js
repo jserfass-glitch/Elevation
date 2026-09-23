@@ -1,6 +1,6 @@
 import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
 import { sunPosition, sunTimes } from './sun.js';
-import { ShadowRenderer } from './shadow.js';
+import { SunRenderer, AspectRenderer } from './terrain.js';
 
 // Time zone of the map location, so the time slider reads in local time there.
 const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
@@ -69,6 +69,8 @@ const ui = {
   sunrise: $('sunrise'),
   sunset: $('sunset'),
   sunInfo: $('sun-info'),
+  aspect: $('ov-aspect'),
+  aspectSection: $('aspect-section'),
 };
 
 const state = {
@@ -93,13 +95,17 @@ const sources = {
   },
   roads: { type: 'raster', tiles: [ROADS_TILES[0]], tileSize: 256, maxzoom: 19, attribution: '© Esri' },
   places: { type: 'raster', tiles: [ROADS_TILES[1]], tileSize: 256, maxzoom: 19 },
-  sun: {
+};
+// Overlays drawn by the WebGL renderers in terrain.js, positioned over the
+// elevation grid they were computed from.
+for (const id of ['sun', 'aspect']) {
+  sources[id] = {
     type: 'canvas',
     canvas: Object.assign(document.createElement('canvas'), { width: 1, height: 1 }),
     coordinates: [[-100, 40], [-99, 40], [-99, 39], [-100, 39]],
     animate: false,
-  },
-};
+  };
+}
 const layers = [];
 for (const [id, b] of Object.entries(BASEMAPS)) {
   sources[`base-${id}`] = { type: 'raster', tiles: b.tiles, tileSize: 256, maxzoom: b.maxzoom, attribution: b.attribution };
@@ -117,6 +123,13 @@ layers.push(
     type: 'color-relief',
     source: 'dem',
     paint: { 'color-relief-opacity': Number(ui.opacity.value), 'color-relief-color': reliefExpression() },
+  },
+  {
+    id: 'aspect',
+    type: 'raster',
+    source: 'aspect',
+    layout: { visibility: 'none' },
+    paint: { 'raster-opacity': Number(ui.opacity.value), 'raster-fade-duration': 0 },
   },
   {
     id: 'sun',
@@ -340,6 +353,7 @@ ui.peak.addEventListener('click', () => {
 ui.opacity.addEventListener('input', () => {
   map.setPaintProperty('elevation-shading', 'color-relief-opacity', Number(ui.opacity.value));
   map.setPaintProperty('sun', 'raster-opacity', Number(ui.opacity.value));
+  map.setPaintProperty('aspect', 'raster-opacity', Number(ui.opacity.value));
 });
 
 const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
@@ -415,7 +429,7 @@ const sun = {
 };
 const MIN_MS = 60000;
 const MARGIN_MS = 20 * MIN_MS; // slider starts this long before sunrise and ends after sunset
-let shadowRenderer = null;
+const renderers = { sun: null, aspect: null };
 
 const formatTime = (ms, withZone = false) =>
   new Intl.DateTimeFormat([], { timeZone: sun.tz, hour: 'numeric', minute: '2-digit', ...(withZone && { timeZoneName: 'short' }) })
@@ -473,28 +487,38 @@ function drawSun() {
   const az = (deg(azimuth) + 360) % 360;
   const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
   ui.sunInfo.textContent = altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon';
-  if (!ui.sun.checked || !shadowRenderer) return;
-  shadowRenderer.render(azimuth, altitude);
-  // The canvas source only re-reads the canvas while "playing".
-  const source = map.getSource('sun');
+  if (!ui.sun.checked || !renderers.sun) return;
+  renderers.sun.render(azimuth, altitude);
+  refreshCanvasSource('sun');
+}
+
+// The canvas source only re-reads its canvas while "playing".
+function refreshCanvasSource(id) {
+  const source = map.getSource(id);
   source.play();
   requestAnimationFrame(() => requestAnimationFrame(() => source.pause()));
 }
 
-// Loads elevation for the view plus a one-tile margin, so ridges just outside
-// the view still cast shadows into it, and hands it to the shadow renderer.
-let sunRun = 0;
-async function updateSunGrid() {
-  if (!ui.sun.checked) return;
-  const run = ++sunRun;
-  if (!shadowRenderer) {
+const RENDERER_CLASSES = { sun: SunRenderer, aspect: AspectRenderer };
+const overlayOn = { sun: () => ui.sun.checked, aspect: () => ui.aspect.checked };
+function ensureRenderer(id) {
+  if (!renderers[id]) {
     try {
-      shadowRenderer = new ShadowRenderer(map.getSource('sun').getCanvas());
+      renderers[id] = new RENDERER_CLASSES[id](map.getSource(id).getCanvas());
     } catch (e) {
-      ui.sunInfo.textContent = `Sun exposure needs WebGL2: ${e.message}`;
-      return;
+      (id === 'sun' ? ui.sunInfo : $('aspect-label')).textContent = `Needs WebGL2: ${e.message}`;
     }
   }
+  return renderers[id];
+}
+
+// Loads elevation for the view plus a one-tile margin, so ridges just outside
+// the view still cast shadows into it, and hands it to the enabled overlays.
+let gridRun = 0;
+async function updateTerrainGrid() {
+  const ids = Object.keys(overlayOn).filter((id) => overlayOn[id]() && ensureRenderer(id));
+  if (!ids.length) return;
+  const run = ++gridRun;
   const MAX_SIDE = 7; // tiles per side including margin, 1792 px
   let z = Math.min(DEM_MAX_ZOOM, Math.max(0, Math.floor(map.getZoom()) + 1));
   let r = viewTileRange(z);
@@ -519,7 +543,7 @@ async function updateSunGrid() {
     }
   }
   const tiles = await Promise.all(jobs);
-  if (run !== sunRun || !ui.sun.checked) return;
+  if (run !== gridRun) return;
 
   const data = new Float32Array(W * H);
   let maxElev = -Infinity;
@@ -531,21 +555,26 @@ async function updateSunGrid() {
       for (let k = 0; k < S; k++) if (row[k] > maxElev) maxElev = row[k];
     }
   }
-  shadowRenderer.setGrid({ data, width: W, height: H, z, originY: gy0 * S, maxElev });
-  map.getSource('sun').setCoordinates([
+  const grid = { data, width: W, height: H, z, originY: gy0 * S, maxElev };
+  const corners = [
     [xToLng(gx0, r.n), yToLat(gy0, r.n)],
     [xToLng(gx0 + nx, r.n), yToLat(gy0, r.n)],
     [xToLng(gx0 + nx, r.n), yToLat(gy0 + ny, r.n)],
     [xToLng(gx0, r.n), yToLat(gy0 + ny, r.n)],
-  ]);
-  drawSun();
+  ];
+  for (const id of ids) {
+    renderers[id].setGrid(grid);
+    map.getSource(id).setCoordinates(corners);
+  }
+  if (ids.includes('sun')) drawSun();
+  if (ids.includes('aspect')) drawAspect();
 }
 
 function setSunEnabled(on) {
   ui.sun.checked = on;
   ui.sunSection.classList.toggle('on', on);
   setVisible('sun', on);
-  if (on) updateSunGrid();
+  if (on) updateTerrainGrid();
   else stopPlay();
 }
 
@@ -584,6 +613,116 @@ ui.sunPlay.addEventListener('click', () => {
     if (next >= Number(s.max)) stopPlay();
   }, 80);
 });
+
+// ---------- Slope direction ----------
+// A compass with two arms. Slopes whose downhill direction lies clockwise from
+// arm A to arm B are shaded.
+
+const aspect = { from: 315, to: 45 }; // default: north-facing slopes
+const compass = $('compass');
+const HANDLE_R = 42;
+const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+const norm = (deg) => ((Math.round(deg) % 360) + 360) % 360;
+const polar = (deg, r) => [r * Math.sin((deg * Math.PI) / 180), -r * Math.cos((deg * Math.PI) / 180)];
+const pointName = (deg) => COMPASS_POINTS[Math.round(norm(deg) / 22.5) % 16];
+
+function drawCompass() {
+  const { from, to } = aspect;
+  const span = norm(to - from) || 360;
+  const [ax, ay] = polar(from, HANDLE_R);
+  const [bx, by] = polar(to, HANDLE_R);
+  $('aspect-wedge').setAttribute(
+    'd',
+    span >= 360
+      ? `M0,${-HANDLE_R}A${HANDLE_R},${HANDLE_R} 0 1 1 0,${HANDLE_R}A${HANDLE_R},${HANDLE_R} 0 1 1 0,${-HANDLE_R}Z`
+      : `M0,0L${ax},${ay}A${HANDLE_R},${HANDLE_R} 0 ${span > 180 ? 1 : 0} 1 ${bx},${by}Z`,
+  );
+  for (const [key, x, y, deg] of [['a', ax, ay, from], ['b', bx, by, to]]) {
+    const line = $(`aspect-line-${key}`);
+    line.setAttribute('x2', x);
+    line.setAttribute('y2', y);
+    const handle = $(`aspect-handle-${key}`);
+    handle.setAttribute('cx', x);
+    handle.setAttribute('cy', y);
+    handle.setAttribute('aria-valuenow', deg);
+    handle.setAttribute('aria-valuetext', `${deg}° ${pointName(deg)}`);
+  }
+  const label = $('aspect-label');
+  if (span >= 360) label.textContent = 'All directions';
+  else {
+    label.textContent = `${pointName(from)} → ${pointName(to)}`;
+    label.append(Object.assign(document.createElement('div'), { className: 'muted', textContent: `${from}°–${to}° (${span}°)` }));
+  }
+}
+
+function drawAspect() {
+  drawCompass();
+  if (!ui.aspect.checked || !renderers.aspect?.grid) return;
+  renderers.aspect.render(aspect.from, aspect.to);
+  refreshCanvasSource('aspect');
+}
+
+function setAspectEnabled(on) {
+  ui.aspect.checked = on;
+  ui.aspectSection.classList.toggle('on', on);
+  setVisible('aspect', on);
+  if (on) updateTerrainGrid();
+}
+ui.aspect.addEventListener('change', () => setAspectEnabled(ui.aspect.checked));
+
+// Compass bearing of a pointer position relative to the dial center.
+function pointerBearing(e) {
+  const box = compass.getBoundingClientRect();
+  const dx = e.clientX - (box.left + box.width / 2);
+  const dy = e.clientY - (box.top + box.height / 2);
+  return (Math.atan2(dx, -dy) * 180) / Math.PI;
+}
+
+let drag = null;
+compass.addEventListener('pointerdown', (e) => {
+  const id = e.target.id;
+  if (id === 'aspect-handle-a') drag = { key: 'from' };
+  else if (id === 'aspect-handle-b') drag = { key: 'to' };
+  else if (id === 'aspect-wedge') drag = { key: 'rotate', start: pointerBearing(e), from: aspect.from, to: aspect.to };
+  else return;
+  e.preventDefault();
+  compass.setPointerCapture(e.pointerId);
+  if (!ui.aspect.checked) setAspectEnabled(true);
+});
+compass.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const b = pointerBearing(e);
+  if (drag.key === 'rotate') {
+    const delta = b - drag.start;
+    aspect.from = norm(drag.from + delta);
+    aspect.to = norm(drag.to + delta);
+  } else {
+    aspect[drag.key] = norm(Math.round(b / 5) * 5); // snap to 5°
+  }
+  drawAspect();
+});
+const endDrag = () => (drag = null);
+compass.addEventListener('pointerup', endDrag);
+compass.addEventListener('pointercancel', endDrag);
+
+for (const [key, prop] of [['a', 'from'], ['b', 'to']]) {
+  $(`aspect-handle-${key}`).addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 5, ArrowUp: 5, ArrowLeft: -5, ArrowDown: -5 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    if (!ui.aspect.checked) setAspectEnabled(true);
+    aspect[prop] = norm(aspect[prop] + step);
+    drawAspect();
+  });
+}
+
+$('aspect-invert').addEventListener('click', () => {
+  [aspect.from, aspect.to] = [aspect.to, aspect.from];
+  if (!ui.aspect.checked) setAspectEnabled(true);
+  drawAspect();
+});
+
+drawCompass();
 
 // ---------- Place search ----------
 // Photon (https://photon.komoot.io) is an OpenStreetMap geocoder built for
@@ -725,7 +864,7 @@ map.on('moveend', () => {
   statsTimer = setTimeout(() => {
     computeViewStats();
     updateSunRange();
-    updateSunGrid();
+    updateTerrainGrid();
   }, 150);
 });
 map.on('load', () => {

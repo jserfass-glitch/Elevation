@@ -1,12 +1,16 @@
-// Renders sunlit terrain from a Web Mercator elevation grid with WebGL2.
-// A pixel is lit when its slope faces the sun and no terrain between it and
-// the sun rises above the ray toward the sun (cast shadows).
+// WebGL2 overlays computed from a Web Mercator elevation grid.
+//
+// SunRenderer: a pixel is lit when its slope faces the sun and no terrain
+// between it and the sun rises above the ray toward the sun (cast shadows).
+// AspectRenderer: a pixel is shaded when the direction its slope faces falls
+// inside a compass arc.
 
 const VERTEX = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
-const FRAGMENT = `#version 300 es
+// Shared by both shaders: grid lookup, pixel size and slope gradient.
+const COMMON = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -15,29 +19,47 @@ uniform sampler2D uDem;   // meters, row 0 = north edge
 uniform ivec2 uSize;      // grid size in pixels
 uniform float uWorldPx;   // 256 * 2^z, the world width in grid pixels
 uniform float uOriginY;   // global pixel row of the grid's north edge
-uniform vec3 uSun;        // unit vector toward the sun: east, north, up
-uniform float uMaxElev;
 uniform vec3 uColor;
 out vec4 outColor;
 
 const float PI = 3.141592653589793;
-const int MAX_STEPS = 1500;
 
 float elev(ivec2 p) { return texelFetch(uDem, clamp(p, ivec2(0), uSize - 1), 0).r; }
 
+ivec2 gridPixel() { return ivec2(int(gl_FragCoord.x), uSize.y - 1 - int(gl_FragCoord.y)); }
+
+// Meters per grid pixel at this row (Mercator scale varies with latitude).
+float pixelMeters(ivec2 p) {
+  float gy = (uOriginY + float(p.y) + 0.5) / uWorldPx;
+  float lat = atan(sinh(PI * (1.0 - 2.0 * gy)));
+  return 40075016.686 * cos(lat) / uWorldPx;
+}
+
+// Elevation gradient (east, north) in m/m, Horn's 3x3 method.
+vec2 gradient(ivec2 p, float pix) {
+  float a = elev(p + ivec2(-1, -1)), b = elev(p + ivec2(0, -1)), c = elev(p + ivec2(1, -1));
+  float d = elev(p + ivec2(-1, 0)),                              f = elev(p + ivec2(1, 0));
+  float g = elev(p + ivec2(-1, 1)),  h = elev(p + ivec2(0, 1)),  i = elev(p + ivec2(1, 1));
+  float dzdx = ((c + 2.0 * f + i) - (a + 2.0 * d + g)) / (8.0 * pix);
+  float dzdn = ((a + 2.0 * b + c) - (g + 2.0 * h + i)) / (8.0 * pix); // row 0 is north
+  return vec2(dzdx, dzdn);
+}
+`;
+
+const SUN_FRAGMENT = `${COMMON}
+uniform vec3 uSun;        // unit vector toward the sun: east, north, up
+uniform float uMaxElev;
+const int MAX_STEPS = 1500;
+
 void main() {
-  ivec2 p = ivec2(int(gl_FragCoord.x), uSize.y - 1 - int(gl_FragCoord.y));
+  ivec2 p = gridPixel();
   outColor = vec4(0.0);
   if (uSun.z <= 0.0) return;
 
-  float gy = (uOriginY + float(p.y) + 0.5) / uWorldPx;
-  float lat = atan(sinh(PI * (1.0 - 2.0 * gy)));
-  float pix = 40075016.686 * cos(lat) / uWorldPx; // meters per grid pixel
-
+  float pix = pixelMeters(p);
   float e = elev(p);
-  float dzdx = (elev(p + ivec2(1, 0)) - elev(p - ivec2(1, 0))) / (2.0 * pix);
-  float dzdn = (elev(p - ivec2(0, 1)) - elev(p + ivec2(0, 1))) / (2.0 * pix);
-  vec3 n = normalize(vec3(-dzdx, -dzdn, 1.0));
+  vec2 grad = gradient(p, pix);
+  vec3 n = normalize(vec3(-grad, 1.0));
   float incidence = dot(n, uSun);
   if (incidence <= 0.0) return; // slope faces away from the sun
 
@@ -58,6 +80,22 @@ void main() {
   outColor = vec4(uColor * a, a); // premultiplied
 }`;
 
+const ASPECT_FRAGMENT = `${COMMON}
+uniform float uFrom;      // arc start, radians clockwise from north
+uniform float uSpan;      // arc width clockwise from uFrom, radians
+uniform float uMinSlope;  // tan of the gentlest slope that counts
+
+void main() {
+  ivec2 p = gridPixel();
+  outColor = vec4(0.0);
+  vec2 grad = gradient(p, pixelMeters(p));
+  if (length(grad) < uMinSlope) return; // flat ground faces no direction
+  float facing = atan(-grad.x, -grad.y); // downhill direction, clockwise from north
+  if (mod(facing - uFrom, 2.0 * PI) > uSpan) return;
+  float a = 0.85;
+  outColor = vec4(uColor * a, a); // premultiplied
+}`;
+
 function compile(gl, type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -66,8 +104,8 @@ function compile(gl, type, src) {
   return s;
 }
 
-export class ShadowRenderer {
-  constructor(canvas) {
+class GridRenderer {
+  constructor(canvas, fragment, uniforms, color) {
     this.canvas = canvas;
     const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false });
     if (!gl) throw new Error('WebGL2 is not available');
@@ -75,12 +113,12 @@ export class ShadowRenderer {
 
     const prog = gl.createProgram();
     gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERTEX));
-    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
+    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, fragment));
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
     gl.useProgram(prog);
     this.u = {};
-    for (const name of ['uDem', 'uSize', 'uWorldPx', 'uOriginY', 'uSun', 'uMaxElev', 'uColor']) {
+    for (const name of ['uDem', 'uSize', 'uWorldPx', 'uOriginY', 'uColor', ...uniforms]) {
       this.u[name] = gl.getUniformLocation(prog, name);
     }
 
@@ -98,7 +136,7 @@ export class ShadowRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(this.u.uDem, 0);
-    gl.uniform3f(this.u.uColor, 1.0, 0.82, 0.12);
+    gl.uniform3f(this.u.uColor, ...color);
     this.grid = null;
   }
 
@@ -115,7 +153,24 @@ export class ShadowRenderer {
     gl.uniform2i(this.u.uSize, grid.width, grid.height);
     gl.uniform1f(this.u.uWorldPx, 256 * 2 ** grid.z);
     gl.uniform1f(this.u.uOriginY, grid.originY);
-    gl.uniform1f(this.u.uMaxElev, grid.maxElev);
+  }
+
+  draw() {
+    const gl = this.gl;
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+}
+
+export class SunRenderer extends GridRenderer {
+  constructor(canvas) {
+    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev'], [1.0, 0.82, 0.12]);
+  }
+
+  setGrid(grid) {
+    super.setGrid(grid);
+    this.gl.uniform1f(this.u.uMaxElev, grid.maxElev);
   }
 
   /** azimuth: radians clockwise from north; altitude: radians above the horizon. */
@@ -124,8 +179,22 @@ export class ShadowRenderer {
     const gl = this.gl;
     const c = Math.cos(altitude);
     gl.uniform3f(this.u.uSun, Math.sin(azimuth) * c, Math.cos(azimuth) * c, Math.sin(altitude));
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.draw();
+  }
+}
+
+export class AspectRenderer extends GridRenderer {
+  constructor(canvas) {
+    super(canvas, ASPECT_FRAGMENT, ['uFrom', 'uSpan', 'uMinSlope'], [0.42, 0.25, 0.95]);
+    this.gl.uniform1f(this.u.uMinSlope, Math.tan((5 * Math.PI) / 180));
+  }
+
+  /** Shades slopes facing clockwise from `fromDeg` to `toDeg` (compass degrees). */
+  render(fromDeg, toDeg) {
+    if (!this.grid) return;
+    const span = (((toDeg - fromDeg) % 360) + 360) % 360;
+    this.gl.uniform1f(this.u.uFrom, (fromDeg * Math.PI) / 180);
+    this.gl.uniform1f(this.u.uSpan, ((span || 360) * Math.PI) / 180);
+    this.draw();
   }
 }

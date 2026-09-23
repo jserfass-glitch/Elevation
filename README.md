@@ -3,6 +3,7 @@
 A static web map that shades terrain above a chosen elevation, similar to CalTopo's elevation shading.
 
 - The slider runs from the lowest to the highest elevation in the current view. At the minimum everything is shaded. Moving it up shades only terrain above that value, with a yellow-to-red ramp up to the highest point.
+- Slope direction: drag the two dots on the compass to pick a range of directions, and slopes facing that way are shaded purple. Dragging inside the wedge rotates it, and Invert swaps to the other side. Ground flatter than 5° is left unshaded because it has no meaningful direction.
 - The search box takes an address, a place or peak name, or `lat, lng` coordinates. Suggestions come from [Photon](https://photon.komoot.io), a free OpenStreetMap geocoder, biased toward the current map view.
 - The dot marks the highest point in view. Click "Highest in view" to zoom to it.
 - Sun exposure: pick a date and drag the time slider, which runs from 20 minutes before sunrise to 20 minutes after sunset at the map center. Sunlit ground is shaded yellow, brighter where the sun hits the slope more directly. Terrain shadows cast by ridges are included. The play button steps through the day. Times are shown in the map location's time zone.
@@ -25,7 +26,7 @@ python3 -m http.server 8000
 
 - Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (Terrarium encoding, free, no API key).
 - Rendering: [MapLibre GL JS](https://maplibre.org/) `hillshade` and `color-relief` layers.
-- Sun exposure: `sun.js` computes sun position and sunrise/sunset (adapted from SunCalc). `shadow.js` ray-marches the elevation grid toward the sun in a WebGL2 shader. Time zones come from `@photostructure/tz-lookup`.
+- Sun exposure: `sun.js` computes sun position and sunrise/sunset (adapted from SunCalc). `terrain.js` ray-marches the elevation grid toward the sun in a WebGL2 shader, and computes slope direction with Horn's 3x3 method for the slope-direction overlay. Time zones come from `@photostructure/tz-lookup`.
 
 The slider range and the highest point are computed by scanning terrain tiles at a coarser zoom than the screen, so peaks can read slightly low when zoomed out (Mount Elbert shows about 14,350 ft at zoom 10 versus 14,440 ft actual). Zoom in for exact values.
 
