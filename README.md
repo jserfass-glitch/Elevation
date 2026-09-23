@@ -3,6 +3,7 @@
 A static web map that shades terrain above a chosen elevation, similar to CalTopo's elevation shading.
 
 - The slider runs from the lowest to the highest elevation in the current view. At the minimum everything is shaded. Moving it up shades only terrain above that value, with a yellow-to-red ramp up to the highest point.
+- The search box takes an address, a place or peak name, or `lat, lng` coordinates. Suggestions come from [Photon](https://photon.komoot.io), a free OpenStreetMap geocoder, biased toward the current map view.
 - The dot marks the highest point in view. Click "Highest in view" to zoom to it.
 - Sun exposure: pick a date and drag the time slider, which runs from 20 minutes before sunrise to 20 minutes after sunset at the map center. Sunlit ground is shaded yellow, brighter where the sun hits the slope more directly. Terrain shadows cast by ridges are included. The play button steps through the day. Times are shown in the map location's time zone.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite.

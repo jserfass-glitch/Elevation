@@ -585,6 +585,138 @@ ui.sunPlay.addEventListener('click', () => {
   }, 80);
 });
 
+// ---------- Place search ----------
+// Photon (https://photon.komoot.io) is an OpenStreetMap geocoder built for
+// search-as-you-type, free and keyless under a fair-use policy.
+
+const PHOTON_URL = 'https://photon.komoot.io/api/';
+const searchInput = $('search-input');
+const searchResults = $('search-results');
+const placeMarker = new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'place-marker' }) });
+let results = [];
+let selected = -1;
+let searchTimer;
+let searchAbort;
+let resultsQuery = null; // the query `results` belong to
+
+// Accepts "39.1175, -106.4453" style coordinates directly.
+function parseLatLng(q) {
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
+function describe(p) {
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const title = p.name || street || p.city || p.county || p.state || 'Unnamed place';
+  const sub = [p.name && street, p.city !== title && p.city, p.state, p.countrycode !== 'US' && p.country]
+    .filter(Boolean)
+    .join(', ');
+  return { title, sub };
+}
+
+async function search(q) {
+  searchAbort?.abort();
+  searchAbort = new AbortController();
+  const c = map.getCenter();
+  const params = new URLSearchParams({ q, limit: '6', lang: 'en', lat: c.lat.toFixed(3), lon: c.lng.toFixed(3) });
+  try {
+    const r = await fetch(`${PHOTON_URL}?${params}`, { signal: searchAbort.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    resultsQuery = q;
+    showResults(
+      data.features.map((f) => ({
+        ...describe(f.properties),
+        center: f.geometry.coordinates,
+        extent: f.properties.extent, // [west, north, east, south]
+        precise: ['house', 'street'].includes(f.properties.type),
+      })),
+    );
+  } catch (e) {
+    if (e.name !== 'AbortError') showResults([], 'Search is unavailable right now');
+  }
+}
+
+function showResults(list, emptyText = 'No matches') {
+  results = list;
+  selected = list.length ? 0 : -1;
+  searchResults.replaceChildren(
+    ...(list.length ? list : [{ title: emptyText }]).map((res, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.textContent = res.title;
+      if (res.sub) li.append(Object.assign(document.createElement('span'), { className: 'sub', textContent: res.sub }));
+      if (list.length) li.addEventListener('mousedown', (e) => (e.preventDefault(), goTo(results[i])));
+      return li;
+    }),
+  );
+  highlight();
+  searchResults.hidden = false;
+  searchInput.setAttribute('aria-expanded', 'true');
+}
+
+function hideResults() {
+  searchResults.hidden = true;
+  searchInput.setAttribute('aria-expanded', 'false');
+}
+
+function highlight() {
+  [...searchResults.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === selected)));
+}
+
+function goTo(res) {
+  hideResults();
+  searchInput.value = res.sub ? `${res.title}, ${res.sub}` : res.title;
+  placeMarker.setLngLat(res.center).addTo(map);
+  const [w, n, e, s] = res.extent || [];
+  if (res.extent && !res.precise && (e - w > 0.01 || n - s > 0.01)) {
+    map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 14 });
+  } else {
+    map.flyTo({ center: res.center, zoom: res.precise ? 15 : 13 });
+  }
+}
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  const ll = parseLatLng(q);
+  if (ll) {
+    resultsQuery = q;
+    return showResults([{ title: `${ll.lat}, ${ll.lng}`, center: [ll.lng, ll.lat], precise: true }]);
+  }
+  if (q.length < 3) return hideResults();
+  searchTimer = setTimeout(() => search(q), 250);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!results.length) return;
+    e.preventDefault();
+    selected = (selected + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length;
+    highlight();
+  } else if (e.key === 'Escape') {
+    hideResults();
+  }
+});
+
+$('search').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = searchInput.value.trim();
+  if (!q) return;
+  if (resultsQuery !== q || !results.length) {
+    clearTimeout(searchTimer);
+    const ll = parseLatLng(q);
+    if (ll) return goTo({ title: q, center: [ll.lng, ll.lat], precise: true });
+    await search(q);
+  }
+  if (results[selected]) goTo(results[selected]);
+});
+
+searchInput.addEventListener('blur', hideResults);
+
 // ---------- View changes ----------
 
 let statsTimer;

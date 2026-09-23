@@ -16,6 +16,12 @@
       <button id="collapse" type="button" aria-expanded="true" title="Collapse panel">–</button>
     </header>
 
+    <form id="search" role="search" autocomplete="off">
+      <input id="search-input" type="search" placeholder="Address, place, or lat, lng" aria-label="Search for a place"
+        aria-autocomplete="list" aria-controls="search-results" aria-expanded="false">
+      <ul id="search-results" role="listbox" hidden></ul>
+    </form>
+
     <div id="panel-body">
       <section>
         <div class="row">
