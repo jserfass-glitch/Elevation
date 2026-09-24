@@ -152,9 +152,9 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 .opacity-row input { width: 150px; }
 #hillshade-strength { accent-color: #555; }
 
-/* The track shows what gets shaded: gray below the thumb, the map's color ramp
-   above it. The background is set from JS as the value changes. */
-#threshold {
+/* Sliders whose track is painted from JS: the shade-above ramp, and the
+   light phases of the day on the sun-time slider. */
+.track-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -162,27 +162,28 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   margin: 8px 0 4px;
   border-radius: 5px;
   background: var(--border);
+  --thumb: var(--accent);
 }
-#threshold::-webkit-slider-thumb {
+.track-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 20px;
   height: 20px;
   border-radius: 50%;
   background: #fff;
-  border: 3px solid var(--accent);
+  border: 3px solid var(--thumb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
-#threshold::-moz-range-thumb {
+.track-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   background: #fff;
-  border: 3px solid var(--accent);
+  border: 3px solid var(--thumb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
-#threshold::-moz-range-track, #threshold::-moz-range-progress { background: transparent; }
+.track-slider::-moz-range-track, .track-slider::-moz-range-progress { background: transparent; }
 #threshold-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .swatch { display: inline-block; width: 22px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-left: 2px; }
@@ -193,7 +194,8 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 }
 .aspect-swatch { background: var(--aspect); opacity: 0.8; }
 
-#sun-time { flex: 1; min-width: 0; accent-color: #d4a106; }
+#sun-time { flex: 1; min-width: 0; margin: 0; --thumb: #b7791f; }
+.golden-note { color: #b7791f; font-weight: 600; }
 #sun-time-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #sun-date { font: inherit; font-size: 12px; color: inherit; background: none; border: 1px solid var(--border); border-radius: 4px; }
 #sun-play { width: 28px; padding: 0; }

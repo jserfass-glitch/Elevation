@@ -62,3 +62,15 @@ export function sunTimes(date, lat, lng) {
   const jSet = J2000 + J0 + (w + lw) / (2 * PI) + n + 0.0053 * sin(M) - 0.0069 * sin(2 * L);
   return { noon, sunrise: fromJulian(jNoon - (jSet - jNoon)), sunset: fromJulian(jSet), polar: null };
 }
+
+// Light phases by sun altitude in degrees. Golden hour is the common
+// photographers' band from 4° below to 6° above the horizon.
+export const GOLDEN_LOW = -4;
+export const GOLDEN_HIGH = 6;
+export const BLUE_LOW = -6;
+export function lightPhase(altitudeDeg) {
+  if (altitudeDeg >= GOLDEN_HIGH) return 'day';
+  if (altitudeDeg >= GOLDEN_LOW) return 'golden';
+  if (altitudeDeg >= BLUE_LOW) return 'blue';
+  return 'night';
+}

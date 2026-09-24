@@ -49,12 +49,16 @@ vec2 gradient(ivec2 p, float pix) {
 const SUN_FRAGMENT = `${COMMON}
 uniform vec3 uSun;        // unit vector toward the sun: east, north, up
 uniform float uMaxElev;
+uniform float uGolden;    // 0..1, how far into golden hour the sun is
 const int MAX_STEPS = 1500;
 const float MAX_ALPHA = 0.7;
+const vec3 GOLD = vec3(1.0, 0.68, 0.16);
+const float GOLD_ALPHA = 0.5;
 
 // Shadowed ground gets a dark veil and sunlit ground is left clear, so the
 // map and other overlays stay readable where the sun is. Slopes the sun only
-// grazes fade in gradually instead of switching on at a hard edge.
+// grazes fade in gradually instead of switching on at a hard edge. During golden
+// hour the sunlit ground takes on a warm glow.
 void main() {
   ivec2 p = gridPixel();
   vec4 shadow = vec4(uColor * MAX_ALPHA, MAX_ALPHA); // premultiplied
@@ -81,7 +85,11 @@ void main() {
       if (texelFetch(uDem, ivec2(s), 0).r > h + 1.0) return; // blocked by terrain
     }
   }
-  outColor = shadow * (1.0 - smoothstep(0.0, 0.2, incidence));
+  // Sunlit ground stays clear in ordinary daylight and glows gold during
+  // golden hour.
+  float lit = smoothstep(0.0, 0.2, incidence);
+  float g = GOLD_ALPHA * uGolden;
+  outColor = shadow * (1.0 - lit) + vec4(GOLD * g, g) * lit;
 }`;
 
 const ASPECT_FRAGMENT = `${COMMON}
@@ -179,7 +187,7 @@ class GridRenderer {
 
 export class SunRenderer extends GridRenderer {
   constructor(canvas) {
-    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev'], [0.06, 0.1, 0.26]);
+    super(canvas, SUN_FRAGMENT, ['uSun', 'uMaxElev', 'uGolden'], [0.06, 0.1, 0.26]);
   }
 
   setGrid(grid) {
@@ -187,12 +195,16 @@ export class SunRenderer extends GridRenderer {
     this.gl.uniform1f(this.u.uMaxElev, grid.maxElev);
   }
 
-  /** azimuth: radians clockwise from north; altitude: radians above the horizon. */
-  render(azimuth, altitude) {
+  /**
+   * azimuth: radians clockwise from north; altitude: radians above the horizon;
+   * golden: 0..1 strength of the golden-hour glow on sunlit ground.
+   */
+  render(azimuth, altitude, golden = 0) {
     if (!this.grid) return;
     const gl = this.gl;
     const c = Math.cos(altitude);
     gl.uniform3f(this.u.uSun, Math.sin(azimuth) * c, Math.cos(azimuth) * c, Math.sin(altitude));
+    gl.uniform1f(this.u.uGolden, golden);
     this.draw();
   }
 }

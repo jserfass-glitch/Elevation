@@ -1,6 +1,6 @@
 import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
 import { DEM_URL, DEM_MAX_ZOOM, DEM_TILE_SIZE, loadTile, lngToX, latToY, xToLng, yToLat, wrapX } from './dem.js';
-import { sunPosition, sunTimes } from './sun.js';
+import { sunPosition, sunTimes, lightPhase, GOLDEN_LOW, GOLDEN_HIGH } from './sun.js';
 import { SunRenderer, AspectRenderer } from './terrain.js';
 import { initSearch } from './search.js';
 import { pointInfo } from './pointinfo.js';
@@ -366,8 +366,17 @@ async function updateSunRange() {
   const prev = sun.times;
   const times = sunTimes(ref, c.lat, c.lng);
   const noon = times.noon.getTime();
-  const lo = times.sunrise ? times.sunrise.getTime() - MARGIN_MS : noon - 12 * 3600000;
-  const hi = times.sunset ? times.sunset.getTime() + MARGIN_MS : noon + 12 * 3600000;
+  // Start just before morning golden hour and end just after evening golden
+  // hour (it begins with the sun 4° below the horizon), or at least 20
+  // minutes either side of sunrise and sunset.
+  const altDeg = (t) => (sunPosition(new Date(t), c.lat, c.lng).altitude * 180) / Math.PI;
+  const edge = (from, step) => {
+    let t = from;
+    for (let i = 0; i < 180 && altDeg(t) >= GOLDEN_LOW; i++) t += step;
+    return t + step * 5;
+  };
+  const lo = times.sunrise ? Math.min(times.sunrise.getTime() - MARGIN_MS, edge(times.sunrise.getTime(), -MIN_MS)) : noon - 12 * 3600000;
+  const hi = times.sunset ? Math.max(times.sunset.getTime() + MARGIN_MS, edge(times.sunset.getTime(), MIN_MS)) : noon + 12 * 3600000;
 
   let t;
   if (sun.time != null && prev) t = noon + (sun.time - prev.noon.getTime());
@@ -389,7 +398,36 @@ async function updateSunRange() {
     ui.sunrise.textContent = `Sunrise ${formatTime(times.sunrise, sun.tz)}`;
     ui.sunset.textContent = `Sunset ${formatTime(times.sunset, sun.tz)}`;
   }
+  paintSunTrack(lo, hi, c);
   drawSun();
+}
+
+// Colors the time slider by light phase (night, blue hour, golden hour, day)
+// and lists the golden-hour windows under it.
+const PHASE_COLORS = { night: '#1f2a44', blue: '#4063a8', golden: '#f2a93b', day: '#cfe6f7' };
+function paintSunTrack(lo, hi, c) {
+  const phaseAt = (t) => lightPhase((sunPosition(new Date(t), c.lat, c.lng).altitude * 180) / Math.PI);
+  const stops = [];
+  const windows = [];
+  let prev = null;
+  let start = null;
+  for (let t = lo; t <= hi; t += MIN_MS) {
+    const ph = phaseAt(t);
+    if (ph !== prev) {
+      const pct = (((t - lo) / (hi - lo)) * 100).toFixed(2);
+      if (prev) stops.push(`${PHASE_COLORS[prev]} ${pct}%`);
+      stops.push(`${PHASE_COLORS[ph]} ${pct}%`);
+      if (prev === 'golden') windows.push([start, t]);
+      if (ph === 'golden') start = t;
+      prev = ph;
+    }
+  }
+  if (prev === 'golden') windows.push([start, hi]);
+  stops.push(`${PHASE_COLORS[prev]} 100%`);
+  ui.sunTime.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+  $('golden-hours').textContent = windows.length
+    ? `Golden hour ${windows.map(([a, b]) => `${formatTime(a, sun.tz)}–${formatTime(b, sun.tz)}`).join(' and ')}`
+    : '';
 }
 
 function drawSun() {
@@ -398,9 +436,15 @@ function drawSun() {
   const deg = (r) => Math.round((r * 180) / Math.PI);
   const az = (deg(azimuth) + 360) % 360;
   const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
-  ui.sunInfo.textContent = altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon';
+  const phase = lightPhase((altitude * 180) / Math.PI);
+  const phaseNote = { golden: ' · golden hour', blue: ' · blue hour' }[phase] ?? '';
+  ui.sunInfo.textContent =
+    (altitude > 0 ? `Sun ${deg(altitude)}° above the horizon, toward ${compass} (${az}°)` : 'Sun is below the horizon') + phaseNote;
   if (!ui.sun.checked || !renderers.sun?.grid) return;
-  renderers.sun.render(azimuth, altitude);
+  // Full glow below the top of golden hour, fading out over the next 2°.
+  const altDeg = (altitude * 180) / Math.PI;
+  const golden = altDeg > 0 ? 1 - Math.min(1, Math.max(0, (altDeg - (GOLDEN_HIGH - 1)) / 2)) : 0;
+  renderers.sun.render(azimuth, altitude, golden);
   refreshCanvasSource('sun');
 }
 

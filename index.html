@@ -56,7 +56,7 @@
             <output id="threshold-value">–</output>
           </div>
           <div class="feature-body">
-            <input id="threshold" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
+            <input id="threshold" class="track-slider" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
             <div class="row small muted">
               <span id="range-min">–</span>
               <span id="range-max">–</span>
@@ -77,13 +77,14 @@
           <div class="feature-body">
             <div class="row">
               <button id="sun-play" type="button" title="Play through the day" aria-label="Play">▶</button>
-              <input id="sun-time" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
+              <input id="sun-time" class="track-slider" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
               <output id="sun-time-value">–</output>
             </div>
             <div class="row small muted">
               <span id="sunrise">–</span>
               <span id="sunset">–</span>
             </div>
+            <div id="golden-hours" class="small golden-note"></div>
             <div id="sun-info" class="small muted"></div>
             <label class="row small opacity-row">Opacity <input id="op-sun" type="range" min="0.1" max="1" step="0.05" value="0.9"></label>
           </div>
