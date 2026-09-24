@@ -765,8 +765,7 @@ document.querySelectorAll('input[name=units]').forEach((el) =>
 
 ui.collapse.addEventListener('click', () => {
   const collapsed = ui.panel.classList.toggle('collapsed');
-  ui.collapse.textContent = collapsed ? '+' : '–';
-  ui.collapse.title = collapsed ? 'Expand panel' : 'Minimize panel';
+  ui.collapse.title = collapsed ? 'Tap to expand' : 'Tap to minimize';
   ui.collapse.setAttribute('aria-expanded', String(!collapsed));
 });
 

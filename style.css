@@ -128,15 +128,18 @@ button.link:disabled { color: var(--muted); cursor: default; }
   min-height: 0;
   overflow: hidden;
 }
-#panel header {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 6px 6px 12px;
-  border-bottom: 1px solid var(--border);
+#panel header { flex: none; border-bottom: 1px solid var(--border); }
+/* The whole title bar toggles the panel. */
+#collapse {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
 }
-#panel header .icon-btn { font-size: 20px; line-height: 1; }
+#collapse:hover { background: var(--hover); }
 #panel-body { overflow-y: auto; min-height: 0; padding: 10px 12px; overscroll-behavior: contain; }
 #panel.collapsed #panel-body { display: none; }
 #panel.collapsed header { border-bottom: 0; }
