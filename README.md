@@ -10,7 +10,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 - Each of the three has its own on/off checkbox and opacity slider.
 - **Tap or click the map** for a popup with coordinates, elevation, which way the slope faces, and hours of direct sun on the sun-exposure date. The sun hours account for the slope and for terrain up to 30 km away blocking the sun.
 - **Search** (top left, minimizable) takes a street address, a place or peak name, or `lat, lng` coordinates.
-- **Overlay bar** (right edge, slides out) toggles shade above, sun exposure, slope direction, hillshade, and roads and places with one tap each.
+- **Overlay bar** (left side, slides out) toggles shade above, sun exposure, slope direction, hillshade, and roads and places with one tap each.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite. Hillshade has its own strength slider.
 - The URL hash keeps the map position, so views can be bookmarked.
 

@@ -218,15 +218,17 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 .aspect-label { font-weight: 600; font-size: 13px; }
 .aspect-row p { margin: 4px 0 6px; }
 
-/* ---------- Right side: slide-out overlay toggles ---------- */
+/* ---------- Slide-out overlay toggles ---------- */
 
+/* Left side, just right of the tools panel on wide screens and under the
+   search bar on phones, away from the zoom buttons. */
 #layerbar {
   position: absolute;
-  top: calc(120px + env(safe-area-inset-top));
-  right: 10px;
+  top: calc(60px + env(safe-area-inset-top));
+  left: 320px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 6px;
   pointer-events: none;
 }
@@ -245,7 +247,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   padding: 2px;
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
-#layerbar:not(.open) #layerbar-items { transform: translateX(calc(100% + 12px)); opacity: 0; pointer-events: none; }
+#layerbar:not(.open) #layerbar-items { transform: translateX(calc(-100% - 12px)); opacity: 0; pointer-events: none; }
 #layerbar-items .icon-btn { color: var(--muted); }
 #layerbar-items .icon-btn[aria-pressed="true"] { color: #fff; background: var(--accent); }
 #layerbar-items [data-overlay="sun"][aria-pressed="true"] { background: #1f2f6b; }
@@ -302,5 +304,5 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   }
   /* Keep the scale bar and attribution above the bottom sheet. */
   .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: var(--sheet-h); }
-  #layerbar { top: calc(110px + env(safe-area-inset-top)); }
+  #layerbar { top: calc(60px + env(safe-area-inset-top)); left: 10px; }
 }
