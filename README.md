@@ -9,6 +9,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 - **Slope direction**: drag the two dots on the compass to pick a range of directions, and slopes facing that way are shaded purple. Dragging inside the wedge rotates it, and Invert swaps to the other side. Ground flatter than 5° is left unshaded because it has no meaningful direction.
 - Each of the three has its own on/off checkbox and opacity slider.
 - **Tap or click the map** for a popup with coordinates, elevation, which way the slope faces, and hours of direct sun on the sun-exposure date. The sun hours account for the slope and for terrain up to 30 km away blocking the sun.
+- **Elevation profile** (chart button at the bottom of the overlay bar): tap the map to place points and the line's profile appears in a sheet. Every point is numbered on the map and the chart, with a dashed line at each segment boundary, and each segment's length, gain and loss is listed. Hovering or dragging on the chart shows that spot on the map. Undo removes the last point.
 - **Search** (top left, minimizable) takes a street address, a place or peak name, or `lat, lng` coordinates.
 - **Overlay bar** (left side, slides out) toggles shade above, sun exposure, slope direction, hillshade, and roads and places with one tap each.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite. Hillshade has its own strength slider.
@@ -39,6 +40,7 @@ python3 -m http.server 8000
 | `sun.js` | Sun position and sunrise/sunset, adapted from SunCalc |
 | `pointinfo.js` | Tap popup: elevation, slope, facing direction, sun hours with a terrain horizon |
 | `search.js` | Geocoding |
+| `profile.js` | Elevation profile sampling and chart |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Installable app: service worker (network-first, offline fallback), manifest and icons |
 
 ## Data

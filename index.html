@@ -27,6 +27,7 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-aspect" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 12V3a9 9 0 0 1 6.4 2.6L12 12Z" fill="currentColor"/></symbol>
     <symbol id="i-hillshade" viewBox="0 0 24 24"><path d="M9 5 2 19h20l-5-8-3 4L9 5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 5l5 10 3-4 5 8H12L9 5Z" fill="currentColor" opacity=".55"/></symbol>
+    <symbol id="i-profile" viewBox="0 0 24 24"><path d="M3 19 8 9l4 6 3-4 6 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="3" cy="19" r="2" fill="currentColor"/><circle cx="8" cy="9" r="2" fill="currentColor"/><circle cx="15" cy="11" r="2" fill="currentColor"/><circle cx="21" cy="19" r="2" fill="currentColor"/></symbol>
     <symbol id="i-roads" viewBox="0 0 24 24"><path d="M7 21 10.5 3M17 21 13.5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18.5v2M12 12v2.5M12 6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   </svg>
 
@@ -159,8 +160,27 @@
       <button type="button" class="icon-btn" data-overlay="aspect" aria-pressed="false" title="Slope direction" aria-label="Slope direction"><svg aria-hidden="true"><use href="#i-aspect"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="hillshade" aria-pressed="true" title="Hillshade" aria-label="Hillshade"><svg aria-hidden="true"><use href="#i-hillshade"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="roads" aria-pressed="false" title="Roads and places" aria-label="Roads and places"><svg aria-hidden="true"><use href="#i-roads"/></svg></button>
+      <hr>
+      <button type="button" class="icon-btn" id="profile-tool" aria-pressed="false" title="Elevation profile" aria-label="Elevation profile"><svg aria-hidden="true"><use href="#i-profile"/></svg></button>
     </div>
   </nav>
+
+  <section id="profile-sheet" class="card" hidden aria-label="Elevation profile">
+    <header>
+      <strong>Elevation profile</strong>
+      <span id="profile-hint" class="small muted">Tap the map to add points</span>
+      <span class="spacer"></span>
+      <button id="profile-undo" type="button" title="Remove last point" disabled>Undo</button>
+      <button id="profile-clear" type="button" title="Start over" disabled>Clear</button>
+      <button id="profile-close" type="button" class="icon-btn" aria-label="Close profile" title="Close">×</button>
+    </header>
+    <div id="profile-body" hidden>
+      <svg id="profile-chart" role="img" aria-label="Elevation along the line"></svg>
+      <div id="profile-readout" class="small muted">&nbsp;</div>
+      <div id="profile-stats" class="small"></div>
+      <ol id="profile-segments" class="small"></ol>
+    </div>
+  </section>
 
   <script type="module" src="app.js"></script>
 </body>

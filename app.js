@@ -4,6 +4,7 @@ import { sunPosition, sunTimes, lightPhase, GOLDEN_LOW, GOLDEN_HIGH } from './su
 import { SunRenderer, AspectRenderer } from './terrain.js';
 import { initSearch } from './search.js';
 import { pointInfo } from './pointinfo.js';
+import { sampleProfile, drawProfileChart } from './profile.js';
 
 // Time zone of a map location, so times read in local time there.
 const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
@@ -760,6 +761,7 @@ document.querySelectorAll('input[name=units]').forEach((el) =>
   el.addEventListener('change', () => {
     state.units = el.value;
     syncSlider();
+    if (profileVertices.length > 1) refreshProfile();
   }),
 );
 
@@ -769,12 +771,15 @@ ui.collapse.addEventListener('click', () => {
   ui.collapse.setAttribute('aria-expanded', String(!collapsed));
 });
 
-// On phones the panel is a bottom sheet; lift the scale bar and attribution above it.
+// On phones the panel (or the profile sheet) is a bottom sheet; lift the
+// scale bar and attribution above it.
 const phone = window.matchMedia('(max-width: 600px)');
-new ResizeObserver(() => {
-  const h = phone.matches ? ui.panel.offsetHeight + 10 : 0;
+function updateSheetHeight() {
+  const sheet = document.body.classList.contains('profiling') ? $('profile-sheet') : ui.panel;
+  const h = phone.matches ? sheet.offsetHeight + 10 : 0;
   document.documentElement.style.setProperty('--sheet-h', `${h}px`);
-}).observe(ui.panel);
+}
+new ResizeObserver(updateSheetHeight).observe(ui.panel);
 
 // ---------- Search ----------
 
@@ -812,6 +817,7 @@ const popup = new maplibregl.Popup({ maxWidth: '260px', focusAfterOpen: false })
 let infoRun = 0;
 
 map.on('click', async (e) => {
+  if (profiling) return addProfileVertex(e.lngLat);
   const run = ++infoRun;
   const { lng, lat } = e.lngLat.wrap();
   const date = ui.sunDate.value || todayIn(browserTz);
@@ -847,6 +853,110 @@ map.on('click', async (e) => {
   }
 });
 
+// ---------- Elevation profile ----------
+// A drawing mode: each tap adds a vertex, the chart shows the profile with a
+// marker at every vertex, and hovering the chart shows the spot on the map.
+
+let profiling = false;
+const profileVertices = []; // [lng, lat]
+const vertexMarkers = [];
+const hoverMarker = marker('hover-marker', '');
+const profileSheet = $('profile-sheet');
+const profileTool = $('profile-tool');
+let profileRun = 0;
+
+const fmtDist = (m) =>
+  state.units === 'ft'
+    ? m < 800
+      ? `${Math.round(m * M_TO_FT).toLocaleString()} ft`
+      : `${(m / 1609.344).toFixed(m < 16093 ? 2 : 1)} mi`
+    : m < 1000
+      ? `${Math.round(m)} m`
+      : `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
+
+function setProfiling(on) {
+  profiling = on;
+  document.body.classList.toggle('profiling', on);
+  profileTool.setAttribute('aria-pressed', String(on));
+  profileSheet.hidden = !on;
+  if (on) {
+    popup.remove();
+  } else {
+    clearProfile();
+  }
+  updateSheetHeight();
+}
+profileTool.addEventListener('click', () => setProfiling(!profiling));
+$('profile-close').addEventListener('click', () => setProfiling(false));
+
+function clearProfile() {
+  profileVertices.length = 0;
+  vertexMarkers.splice(0).forEach((m) => m.remove());
+  hoverMarker.remove();
+  map.getSource('profile-line')?.setData({ type: 'FeatureCollection', features: [] });
+  refreshProfile();
+}
+$('profile-clear').addEventListener('click', clearProfile);
+$('profile-undo').addEventListener('click', () => {
+  profileVertices.pop();
+  vertexMarkers.pop()?.remove();
+  refreshProfile();
+});
+
+function addProfileVertex(lngLat) {
+  const v = [lngLat.lng, lngLat.lat];
+  profileVertices.push(v);
+  const el = Object.assign(document.createElement('div'), { className: 'vertex-marker', textContent: String(profileVertices.length) });
+  vertexMarkers.push(new maplibregl.Marker({ element: el }).setLngLat(v).addTo(map));
+  refreshProfile();
+}
+
+async function refreshProfile() {
+  const n = profileVertices.length;
+  $('profile-undo').disabled = n === 0;
+  $('profile-clear').disabled = n === 0;
+  $('profile-hint').textContent = n === 0 ? 'Tap the map to add points' : n === 1 ? 'Tap again to add the next point' : 'Tap to extend the line';
+  map.getSource('profile-line')?.setData({
+    type: 'FeatureCollection',
+    features: n > 1 ? [{ type: 'Feature', geometry: { type: 'LineString', coordinates: profileVertices } }] : [],
+  });
+  $('profile-body').hidden = n < 2;
+  updateSheetHeight();
+  if (n < 2) return;
+
+  const run = ++profileRun;
+  $('profile-readout').textContent = 'Loading elevation…';
+  const profile = await sampleProfile(profileVertices);
+  if (run !== profileRun || !profile) return;
+
+  drawProfileChart($('profile-chart'), profile, {
+    toUnits,
+    fmtElev: (v) => Math.round(v).toLocaleString(),
+    fmtDist,
+    onHover(p) {
+      if (!p) {
+        hoverMarker.remove();
+        $('profile-readout').innerHTML = '&nbsp;';
+        return;
+      }
+      hoverMarker.setLngLat(p.lngLat).addTo(map);
+      $('profile-readout').textContent = `${fmtDist(p.d)} along, ${fmt(p.elev)}, segment ${p.seg + 1}→${p.seg + 2}`;
+    },
+  });
+  $('profile-readout').innerHTML = '&nbsp;';
+  const first = profile.vertices[0].elev;
+  const last = profile.vertices[profile.vertices.length - 1].elev;
+  $('profile-stats').innerHTML = `<span>Length <b>${fmtDist(profile.length)}</b></span><span class="gain">Gain <b>+${fmt(profile.gain)}</b></span><span class="loss">Loss <b>−${fmt(profile.loss)}</b></span><span>Start <b>${fmt(first)}</b></span><span>End <b>${fmt(last)}</b></span>`;
+  $('profile-segments').replaceChildren(
+    ...profile.segments.map((s, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="seg-name">${i + 1}→${i + 2}</span><span>${fmtDist(s.length)}</span><span class="gain">+${fmt(s.gain)}</span><span class="loss">−${fmt(s.loss)}</span>`;
+      return li;
+    }),
+  );
+  updateSheetHeight();
+}
+
 // ---------- View changes ----------
 
 let viewTimer;
@@ -871,6 +981,15 @@ if ('serviceWorker' in navigator) {
 }
 
 map.on('load', () => {
+  map.addSource('profile-line', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'profile-line',
+    type: 'line',
+    source: 'profile-line',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#b45309', 'line-width': 3, 'line-opacity': 0.9 },
+  });
+  map.addLayer({ id: 'profile-line-casing', type: 'line', source: 'profile-line', paint: { 'line-color': '#fff', 'line-width': 6, 'line-opacity': 0.7 } }, 'profile-line');
   // Start with the attribution collapsed to its (i) button so it doesn't cover the map.
   document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
   computeViewStats();

@@ -255,6 +255,67 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 #layerbar-items [data-overlay="hillshade"][aria-pressed="true"],
 #layerbar-items [data-overlay="roads"][aria-pressed="true"] { background: #4b5563; }
 
+#layerbar-items hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--border); }
+#profile-tool[aria-pressed="true"] { color: #fff; background: #0e7490; }
+
+/* ---------- Elevation profile sheet ---------- */
+
+#profile-sheet {
+  position: absolute;
+  left: 320px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  max-width: 760px;
+  margin-left: auto;
+  z-index: 2;
+}
+#profile-sheet header { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; flex-wrap: wrap; }
+#profile-sheet header .spacer { flex: 1; }
+#profile-sheet header button { height: 26px; }
+#profile-sheet header .icon-btn { height: 28px; width: 28px; font-size: 20px; }
+#profile-body { padding: 0 12px 10px; }
+#profile-chart { display: block; width: 100%; height: 150px; touch-action: none; }
+#profile-chart .seg-band { fill: transparent; }
+#profile-chart .seg-band.odd { fill: rgba(127, 127, 127, 0.08); }
+#profile-chart .grid { stroke: var(--border); stroke-width: 1; }
+#profile-chart .axis { fill: var(--muted); font-size: 10px; }
+#profile-chart .area { fill: rgba(14, 116, 144, 0.18); }
+#profile-chart .line { fill: none; stroke: #0e7490; stroke-width: 2; stroke-linejoin: round; }
+#profile-chart .vertex-line { stroke: #b45309; stroke-width: 1; stroke-dasharray: 3 3; }
+#profile-chart .vertex-dot { fill: #fff; stroke: #b45309; stroke-width: 2; }
+#profile-chart .vertex-label { fill: #b45309; font-size: 11px; font-weight: 700; }
+#profile-chart .cursor { stroke: var(--fg); stroke-width: 1; }
+#profile-chart .cursor-dot { fill: var(--fg); }
+#profile-readout { min-height: 1.4em; font-variant-numeric: tabular-nums; }
+#profile-stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0; font-variant-numeric: tabular-nums; }
+#profile-stats b { font-weight: 600; }
+#profile-segments { margin: 4px 0 0; padding-left: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; font-variant-numeric: tabular-nums; }
+#profile-segments li { display: flex; gap: 6px; }
+#profile-segments .seg-name { color: #b45309; font-weight: 600; min-width: 3.2em; }
+.gain { color: #b91c1c; }
+.loss { color: #1d4ed8; }
+
+body.profiling #map { cursor: crosshair; }
+.vertex-marker {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #b45309;
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  font: 700 11px/16px system-ui, sans-serif;
+  text-align: center;
+}
+.hover-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #0e7490;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
 /* ---------- Map markers and tap popup ---------- */
 
 .place-marker, .peak-marker {
@@ -305,4 +366,9 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   /* Keep the scale bar and attribution above the bottom sheet. */
   .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: var(--sheet-h); }
   #layerbar { top: calc(60px + env(safe-area-inset-top)); left: 10px; }
+  #profile-sheet { left: 10px; max-height: 55%; overflow-y: auto; }
+  #profile-sheet header { flex-wrap: nowrap; }
+  /* Once the chart is up the hint just takes room from the buttons. */
+  #profile-sheet:has(#profile-body:not([hidden])) #profile-hint { display: none; }
+  body.profiling #panel { display: none; }
 }
