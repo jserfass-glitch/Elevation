@@ -37,8 +37,8 @@
         <svg class="search-icon" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="search-input" type="search" placeholder="Address, place, or lat, lng" aria-label="Search for a place"
           aria-autocomplete="list" aria-controls="search-results" aria-expanded="false" enterkeyhint="search">
-        <ul id="search-results" role="listbox" hidden></ul>
       </form>
+      <ul id="search-results" role="listbox" hidden></ul>
       <button id="search-toggle" type="button" class="icon-btn" aria-expanded="true" aria-label="Minimize search" title="Minimize search">
         <svg aria-hidden="true"><use href="#i-minimize"/></svg>
       </button>
@@ -51,6 +51,7 @@
         </button>
       </header>
 
+      <div id="panel-drawer">
       <div id="panel-body">
         <section id="shade-section" class="feature on">
           <div class="row">
@@ -147,6 +148,7 @@
           <p class="small muted">Tap or click the map for elevation, slope, and sun hours at a spot.</p>
         </section>
       </div>
+      </div>
     </aside>
   </div>
 
@@ -159,13 +161,12 @@
       <button type="button" class="icon-btn" data-overlay="sun" aria-pressed="false" title="Sun exposure" aria-label="Sun exposure"><svg aria-hidden="true"><use href="#i-sun"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="aspect" aria-pressed="false" title="Slope direction" aria-label="Slope direction"><svg aria-hidden="true"><use href="#i-aspect"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="hillshade" aria-pressed="true" title="Hillshade" aria-label="Hillshade"><svg aria-hidden="true"><use href="#i-hillshade"/></svg></button>
-      <button type="button" class="icon-btn" data-overlay="roads" aria-pressed="false" title="Roads and places" aria-label="Roads and places"><svg aria-hidden="true"><use href="#i-roads"/></svg></button>
       <hr>
       <button type="button" class="icon-btn" id="profile-tool" aria-pressed="false" title="Elevation profile" aria-label="Elevation profile"><svg aria-hidden="true"><use href="#i-profile"/></svg></button>
     </div>
   </nav>
 
-  <section id="profile-sheet" class="card" hidden aria-label="Elevation profile">
+  <section id="profile-sheet" class="card" aria-label="Elevation profile" aria-hidden="true">
     <header>
       <strong>Elevation profile</strong>
       <span id="profile-hint" class="small muted">Tap the map to add points</span>
@@ -174,11 +175,13 @@
       <button id="profile-clear" type="button" title="Start over" disabled>Clear</button>
       <button id="profile-close" type="button" class="icon-btn" aria-label="Close profile" title="Close">×</button>
     </header>
-    <div id="profile-body" hidden>
-      <svg id="profile-chart" role="img" aria-label="Elevation along the line"></svg>
-      <div id="profile-readout" class="small muted">&nbsp;</div>
-      <div id="profile-stats" class="small"></div>
-      <ol id="profile-segments" class="small"></ol>
+    <div id="profile-body">
+      <div id="profile-inner">
+        <svg id="profile-chart" role="img" aria-label="Elevation along the line"></svg>
+        <div id="profile-readout" class="small muted">&nbsp;</div>
+        <div id="profile-stats" class="small"></div>
+        <ol id="profile-segments" class="small"></ol>
+      </div>
     </div>
   </section>
 

@@ -11,7 +11,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 - **Tap or click the map** for a popup with coordinates, elevation, which way the slope faces, and hours of direct sun on the sun-exposure date. The sun hours account for the slope and for terrain up to 30 km away blocking the sun.
 - **Elevation profile** (chart button at the bottom of the overlay bar): tap the map to place points and the line's profile appears in a sheet. Every point is numbered on the map and the chart, with a dashed line at each segment boundary, and each segment's length, gain and loss is listed. Hovering or dragging on the chart shows that spot on the map. Undo removes the last point.
 - **Search** (top left, minimizable) takes a street address, a place or peak name, or `lat, lng` coordinates.
-- **Overlay bar** (left side, slides out) toggles shade above, sun exposure, slope direction, hillshade, and roads and places with one tap each.
+- **Overlay bar** (left side, slides out) drops down from the layers button and toggles shade above, sun exposure, slope direction and hillshade with one tap each, plus the profile tool.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite. Hillshade has its own strength slider.
 - The URL hash keeps the map position, so views can be bookmarked.
 

@@ -704,11 +704,11 @@ for (const [id, o] of Object.entries(overlays)) {
   o.set = (on) => {
     o.input.checked = on;
     o.input.closest('.feature')?.classList.toggle('on', on);
-    layerButtons[id].setAttribute('aria-pressed', String(on));
+    layerButtons[id]?.setAttribute('aria-pressed', String(on));
     o.apply(on);
   };
   o.input.addEventListener('change', () => o.set(o.input.checked));
-  layerButtons[id].addEventListener('click', () => o.set(!o.input.checked));
+  layerButtons[id]?.addEventListener('click', () => o.set(!o.input.checked));
 }
 
 const layerbar = $('layerbar');
@@ -779,7 +779,9 @@ function updateSheetHeight() {
   const h = phone.matches ? sheet.offsetHeight + 10 : 0;
   document.documentElement.style.setProperty('--sheet-h', `${h}px`);
 }
-new ResizeObserver(updateSheetHeight).observe(ui.panel);
+const sheetObserver = new ResizeObserver(updateSheetHeight);
+sheetObserver.observe(ui.panel);
+sheetObserver.observe($('profile-sheet'));
 
 // ---------- Search ----------
 
@@ -878,7 +880,8 @@ function setProfiling(on) {
   profiling = on;
   document.body.classList.toggle('profiling', on);
   profileTool.setAttribute('aria-pressed', String(on));
-  profileSheet.hidden = !on;
+  profileSheet.classList.toggle('open', on);
+  profileSheet.setAttribute('aria-hidden', String(!on));
   if (on) {
     popup.remove();
   } else {
@@ -920,7 +923,7 @@ async function refreshProfile() {
     type: 'FeatureCollection',
     features: n > 1 ? [{ type: 'Feature', geometry: { type: 'LineString', coordinates: profileVertices } }] : [],
   });
-  $('profile-body').hidden = n < 2;
+  $('profile-body').classList.toggle('open', n >= 2);
   updateSheetHeight();
   if (n < 2) return;
 
