@@ -56,7 +56,7 @@
         <section id="shade-section" class="feature on">
           <div class="row">
             <label><input type="checkbox" id="ov-shade" checked> <strong>Shade above</strong></label>
-            <output id="threshold-value">–</output>
+            <span class="value-field"><input id="threshold-value" type="number" inputmode="numeric" placeholder="everything" aria-label="Shade above elevation, typed" disabled><span id="threshold-unit">ft</span></span>
           </div>
           <div class="feature-body">
             <input id="threshold" class="track-slider" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
@@ -81,7 +81,7 @@
             <div class="row">
               <button id="sun-play" type="button" title="Play through the day" aria-label="Play">▶</button>
               <input id="sun-time" class="track-slider" type="range" min="0" max="1" step="1" value="0" aria-label="Time of day">
-              <output id="sun-time-value">–</output>
+              <span class="value-field"><input id="sun-time-value" type="time" aria-label="Time of day, typed"><span id="sun-zone"></span></span>
             </div>
             <div class="row small muted">
               <span id="sunrise">–</span>
@@ -113,6 +113,11 @@
               </svg>
               <div class="small">
                 <div id="aspect-label" class="aspect-label">–</div>
+                <div class="row aspect-fields">
+                  <span class="value-field"><input id="aspect-from" type="number" inputmode="numeric" min="0" max="359" step="1" aria-label="Start direction, degrees">°</span>
+                  <span class="muted">to</span>
+                  <span class="value-field"><input id="aspect-to" type="number" inputmode="numeric" min="0" max="359" step="1" aria-label="End direction, degrees">°</span>
+                </div>
                 <p class="muted">Drag the dots to set the range. Drag inside the wedge to rotate it.</p>
                 <button id="aspect-invert" type="button">Invert</button>
               </div>

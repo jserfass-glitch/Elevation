@@ -207,7 +207,30 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   cursor: pointer;
 }
 .track-slider::-moz-range-track, .track-slider::-moz-range-progress { background: transparent; }
-#threshold-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Typed values beside the sliders and compass. */
+.value-field { display: inline-flex; align-items: baseline; gap: 3px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.value-field input {
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--border);
+  padding: 0 2px;
+  text-align: right;
+  width: 6em;
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+.value-field input:focus { border-bottom: 1px solid var(--accent); }
+.value-field input::-webkit-outer-spin-button, .value-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.value-field input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.value-field input[type="time"] { width: auto; text-align: left; }
+.value-field input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
+.value-field input::placeholder { color: var(--fg); opacity: 1; font-weight: 600; }
+#threshold-value { width: 5.5em; }
+.aspect-fields { justify-content: flex-start; margin: 2px 0 4px; }
+.aspect-fields input { width: 3em; }
 
 .swatch { display: inline-block; width: 22px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-left: 2px; }
 .sun-swatch {
@@ -219,7 +242,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 
 #sun-time { flex: 1; min-width: 0; margin: 0; --thumb: #b7791f; }
 .golden-note { color: #b7791f; font-weight: 600; }
-#sun-time-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#sun-zone { font-weight: 600; }
 #sun-date { font: inherit; font-size: 12px; color: inherit; background: none; border: 1px solid var(--border); border-radius: 4px; }
 #sun-play { width: 28px; padding: 0; }
 

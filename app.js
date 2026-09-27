@@ -306,7 +306,7 @@ function syncSlider() {
   s.value = state.threshold == null ? lo : toUnits(state.threshold);
   ui.rangeMin.textContent = fmt(state.min);
   ui.rangeMax.textContent = fmt(state.max);
-  ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
+  syncThresholdField();
   ui.peak.disabled = false;
   ui.peak.textContent = `Highest in view: ${fmt(state.max)}`;
   paintThresholdTrack();
@@ -326,9 +326,28 @@ ui.threshold.addEventListener('input', () => {
   if (!ui.shade.checked) overlays.shade.set(true);
   const v = Number(ui.threshold.value);
   state.threshold = v <= Number(ui.threshold.min) ? null : fromUnits(v);
-  ui.thresholdValue.textContent = state.threshold == null ? 'everything' : fmt(state.threshold);
+  syncThresholdField();
   paintThresholdTrack();
   updateShading();
+});
+
+// Typed elevation: blank or at/below the view minimum means "everything".
+function syncThresholdField() {
+  ui.thresholdValue.disabled = false;
+  ui.thresholdValue.value = state.threshold == null ? '' : String(Math.round(toUnits(state.threshold)));
+  $('threshold-unit').textContent = state.units;
+}
+ui.thresholdValue.addEventListener('change', () => {
+  if (state.min == null) return;
+  if (!ui.shade.checked) overlays.shade.set(true);
+  const v = Number(ui.thresholdValue.value);
+  if (ui.thresholdValue.value === '' || !Number.isFinite(v) || v <= toUnits(state.min)) state.threshold = null;
+  else state.threshold = Math.min(fromUnits(v), state.max);
+  syncSlider();
+  updateShading();
+});
+ui.thresholdValue.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') ui.thresholdValue.blur();
 });
 
 ui.peak.addEventListener('click', () => {
@@ -432,7 +451,9 @@ function paintSunTrack(lo, hi, c) {
 }
 
 function drawSun() {
-  ui.sunTimeValue.textContent = formatTime(sun.time, sun.tz, true);
+  ui.sunTimeValue.value = new Intl.DateTimeFormat('en-GB', { timeZone: sun.tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(sun.time));
+  $('sun-zone').textContent = new Intl.DateTimeFormat([], { timeZone: sun.tz, timeZoneName: 'short' })
+    .formatToParts(new Date(sun.time)).find((p) => p.type === 'timeZoneName')?.value ?? '';
   const { azimuth, altitude } = sunPosition(new Date(sun.time), sun.lat, sun.lng);
   const deg = (r) => Math.round((r * 180) / Math.PI);
   const az = (deg(azimuth) + 360) % 360;
@@ -531,6 +552,31 @@ ui.sunTime.addEventListener('input', () => {
   drawSun();
 });
 
+// Minutes that `tz` is ahead of UTC at instant `ms`.
+function tzOffsetMinutes(tz, ms) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+    .formatToParts(new Date(ms));
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  return Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60000);
+}
+
+// Typed time of day, read in the map location's zone on the chosen date.
+ui.sunTimeValue.addEventListener('change', () => {
+  const m = ui.sunTimeValue.value.match(/^(\d{1,2}):(\d{2})/);
+  if (!m || !sun.times) return drawSun();
+  if (!ui.sun.checked) overlays.sun.set(true);
+  const [y, mo, d] = ui.sunDate.value.split('-').map(Number);
+  const wall = Date.UTC(y, mo - 1, d, Number(m[1]), Number(m[2])); // the typed clock time, read as UTC
+  let ms = wall - tzOffsetMinutes(sun.tz, wall) * MIN_MS;
+  ms = wall - tzOffsetMinutes(sun.tz, ms) * MIN_MS; // recheck the offset at the guess, for DST edges
+  const lo = Number(ui.sunTime.min) * MIN_MS;
+  const hi = Number(ui.sunTime.max) * MIN_MS;
+  sun.time = Math.min(hi, Math.max(lo, ms));
+  ui.sunTime.value = Math.round(sun.time / MIN_MS);
+  drawSun();
+});
+
 ui.sunDate.addEventListener('change', () => {
   if (!ui.sunDate.value) ui.sunDate.value = todayIn(sun.tz);
   if (!ui.sun.checked) overlays.sun.set(true);
@@ -593,11 +639,24 @@ function drawCompass() {
     handle.setAttribute('aria-valuetext', `${deg}° ${pointName(deg)}`);
   }
   const label = $('aspect-label');
-  if (span >= 360) label.textContent = 'All directions';
-  else {
-    label.textContent = `${pointName(from)} → ${pointName(to)}`;
-    label.append(Object.assign(document.createElement('div'), { className: 'muted', textContent: `${from}°–${to}° (${span}°)` }));
-  }
+  label.textContent = span >= 360 ? 'All directions' : `${pointName(from)} → ${pointName(to)} (${span}° wide)`;
+  if (document.activeElement !== $('aspect-from')) $('aspect-from').value = from;
+  if (document.activeElement !== $('aspect-to')) $('aspect-to').value = to;
+}
+
+for (const [id, prop] of [['aspect-from', 'from'], ['aspect-to', 'to']]) {
+  const input = $(id);
+  input.addEventListener('change', () => {
+    const v = Number(input.value);
+    if (input.value === '' || !Number.isFinite(v)) return drawCompass();
+    if (!ui.aspect.checked) overlays.aspect.set(true);
+    aspect[prop] = norm(v);
+    drawAspect();
+    input.value = aspect[prop]; // show the wrapped value even while the field has focus
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.blur();
+  });
 }
 
 function drawAspect() {
@@ -761,6 +820,7 @@ document.querySelectorAll('input[name=units]').forEach((el) =>
   el.addEventListener('change', () => {
     state.units = el.value;
     syncSlider();
+    syncThresholdField();
     if (profileVertices.length > 1) refreshProfile();
   }),
 );
