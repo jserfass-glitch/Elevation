@@ -27,6 +27,9 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-aspect" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 12V3a9 9 0 0 1 6.4 2.6L12 12Z" fill="currentColor"/></symbol>
     <symbol id="i-hillshade" viewBox="0 0 24 24"><path d="M9 5 2 19h20l-5-8-3 4L9 5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 5l5 10 3-4 5 8H12L9 5Z" fill="currentColor" opacity=".55"/></symbol>
+    <symbol id="i-slope" viewBox="0 0 24 24"><path d="M3 20h18V6L3 20Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20a7 7 0 0 0-1.5-4.3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 17c3-6 6 2 9-3s5-7 9-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-pan" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-profile" viewBox="0 0 24 24"><path d="M3 19 8 9l4 6 3-4 6 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="3" cy="19" r="2" fill="currentColor"/><circle cx="8" cy="9" r="2" fill="currentColor"/><circle cx="15" cy="11" r="2" fill="currentColor"/><circle cx="21" cy="19" r="2" fill="currentColor"/></symbol>
     <symbol id="i-roads" viewBox="0 0 24 24"><path d="M7 21 10.5 3M17 21 13.5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18.5v2M12 12v2.5M12 6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   </svg>
@@ -55,14 +58,16 @@
       <div id="panel-body">
         <section id="shade-section" class="feature on">
           <div class="row">
-            <label><input type="checkbox" id="ov-shade" checked> <strong>Shade above</strong></label>
-            <span class="value-field"><input id="threshold-value" type="number" inputmode="numeric" placeholder="everything" aria-label="Shade above elevation, typed" disabled><span id="threshold-unit">ft</span></span>
+            <label><input type="checkbox" id="ov-shade" checked> <strong>Shade elevations</strong></label>
           </div>
           <div class="feature-body">
-            <input id="threshold" class="track-slider" type="range" aria-label="Shade above elevation" min="0" max="1" step="1" value="0" disabled>
-            <div class="row small muted">
-              <span id="range-min">–</span>
-              <span id="range-max">–</span>
+            <div id="elev-range" class="dual-range">
+              <input id="threshold" type="range" aria-label="Lowest elevation to shade" min="0" max="1" step="1" value="0" disabled>
+              <input id="threshold-high" type="range" aria-label="Highest elevation to shade" min="0" max="1" step="1" value="1" disabled>
+            </div>
+            <div class="row range-ends">
+              <span class="value-field"><input id="threshold-value" type="number" inputmode="numeric" aria-label="Lowest elevation to shade" disabled><span class="unit">ft</span></span>
+              <span class="value-field"><input id="threshold-high-value" type="number" inputmode="numeric" aria-label="Highest elevation to shade" disabled><span class="unit">ft</span></span>
             </div>
             <div class="row small">
               <button id="peak" type="button" class="link" disabled>Highest in view: –</button>
@@ -126,6 +131,27 @@
           </div>
         </section>
 
+        <section id="slope-section" class="feature">
+          <div class="row">
+            <label><input type="checkbox" id="ov-slope"> <strong>Slope angle</strong></label>
+            <span class="value-field range-fields">
+              <input id="slope-min-value" type="number" inputmode="numeric" min="0" max="60" aria-label="Gentlest slope to shade, degrees">
+              <span class="muted">–</span>
+              <input id="slope-max-value" type="number" inputmode="numeric" min="0" max="60" aria-label="Steepest slope to shade, degrees">
+              <span>°</span>
+            </span>
+          </div>
+          <div class="feature-body">
+            <div id="slope-range" class="dual-range">
+              <input id="slope-min" type="range" aria-label="Gentlest slope to shade" min="0" max="60" step="1" value="27">
+              <input id="slope-max" type="range" aria-label="Steepest slope to shade" min="0" max="60" step="1" value="60">
+            </div>
+            <div id="slope-scale" class="scale small muted" aria-hidden="true"></div>
+            <div id="slope-note" class="small muted"></div>
+            <label class="row small opacity-row">Opacity <input id="op-slope" type="range" min="0.1" max="1" step="0.05" value="0.6"></label>
+          </div>
+        </section>
+
         <section>
           <h2>Base map</h2>
           <div class="choices" role="radiogroup">
@@ -162,9 +188,10 @@
       <svg aria-hidden="true"><use href="#i-layers"/></svg>
     </button>
     <div id="layerbar-items">
-      <button type="button" class="icon-btn" data-overlay="shade" aria-pressed="true" title="Shade above" aria-label="Shade above"><svg aria-hidden="true"><use href="#i-shade"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="shade" aria-pressed="true" title="Shade elevations" aria-label="Shade elevations"><svg aria-hidden="true"><use href="#i-shade"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="sun" aria-pressed="false" title="Sun exposure" aria-label="Sun exposure"><svg aria-hidden="true"><use href="#i-sun"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="aspect" aria-pressed="false" title="Slope direction" aria-label="Slope direction"><svg aria-hidden="true"><use href="#i-aspect"/></svg></button>
+      <button type="button" class="icon-btn" data-overlay="slope" aria-pressed="false" title="Slope angle" aria-label="Slope angle"><svg aria-hidden="true"><use href="#i-slope"/></svg></button>
       <button type="button" class="icon-btn" data-overlay="hillshade" aria-pressed="true" title="Hillshade" aria-label="Hillshade"><svg aria-hidden="true"><use href="#i-hillshade"/></svg></button>
       <hr>
       <button type="button" class="icon-btn" id="profile-tool" aria-pressed="false" title="Elevation profile" aria-label="Elevation profile"><svg aria-hidden="true"><use href="#i-profile"/></svg></button>
@@ -174,12 +201,18 @@
   <section id="profile-sheet" class="card" aria-label="Elevation profile" aria-hidden="true">
     <header>
       <strong>Elevation profile</strong>
-      <span id="profile-hint" class="small muted">Tap the map to add points</span>
       <span class="spacer"></span>
-      <button id="profile-undo" type="button" title="Remove last point" disabled>Undo</button>
+      <button id="profile-undo" type="button" title="Remove the last segment" disabled>Undo</button>
       <button id="profile-clear" type="button" title="Start over" disabled>Clear</button>
       <button id="profile-close" type="button" class="icon-btn" aria-label="Close profile" title="Close">×</button>
     </header>
+    <div class="profile-tools">
+      <span class="segmented" role="group" aria-label="What dragging on the map does">
+        <button id="profile-mode-draw" type="button" aria-pressed="true"><svg aria-hidden="true"><use href="#i-draw"/></svg> Draw</button>
+        <button id="profile-mode-pan" type="button" aria-pressed="false"><svg aria-hidden="true"><use href="#i-pan"/></svg> Move map</button>
+      </span>
+      <span id="profile-hint" class="small muted"></span>
+    </div>
     <div id="profile-body">
       <div id="profile-inner">
         <svg id="profile-chart" role="img" aria-label="Elevation along the line"></svg>

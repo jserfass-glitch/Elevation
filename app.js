@@ -1,10 +1,11 @@
 import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
 import { DEM_URL, DEM_MAX_ZOOM, DEM_TILE_SIZE, loadTile, lngToX, latToY, xToLng, yToLat, wrapX } from './dem.js';
 import { sunPosition, sunTimes, lightPhase, GOLDEN_LOW, GOLDEN_HIGH } from './sun.js';
-import { SunRenderer, AspectRenderer } from './terrain.js';
+import { SunRenderer, AspectRenderer, SlopeRenderer, SLOPE_CLASSES } from './terrain.js';
+import { DualRange } from './dualrange.js';
 import { initSearch } from './search.js';
 import { pointInfo } from './pointinfo.js';
-import { sampleProfile, drawProfileChart } from './profile.js';
+import { sampleProfile, drawProfileChart, simplify } from './profile.js';
 
 // Time zone of a map location, so times read in local time there.
 const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
@@ -59,8 +60,7 @@ const ui = {
   collapse: $('collapse'),
   threshold: $('threshold'),
   thresholdValue: $('threshold-value'),
-  rangeMin: $('range-min'),
-  rangeMax: $('range-max'),
+  thresholdHighValue: $('threshold-high-value'),
   peak: $('peak'),
   status: $('status'),
   shade: $('ov-shade'),
@@ -76,7 +76,8 @@ const ui = {
   sunset: $('sunset'),
   sunInfo: $('sun-info'),
   aspect: $('ov-aspect'),
-  opacity: { shade: $('op-shade'), sun: $('op-sun'), aspect: $('op-aspect') },
+  slope: $('ov-slope'),
+  opacity: { shade: $('op-shade'), sun: $('op-sun'), aspect: $('op-aspect'), slope: $('op-slope') },
 };
 
 const state = {
@@ -85,6 +86,7 @@ const state = {
   max: null, // meters, highest point in view
   peak: null, // [lng, lat] of the highest point in view
   threshold: null, // meters; null means "at minimum", shade everything
+  thresholdHigh: null, // meters; null means no upper limit
 };
 
 // ---------- Map ----------
@@ -111,7 +113,7 @@ const sources = {
 };
 // Overlays drawn by the WebGL renderers in terrain.js, positioned over the
 // elevation grid they were computed from.
-for (const id of ['sun', 'aspect']) {
+for (const id of ['sun', 'aspect', 'slope']) {
   sources[id] = {
     type: 'canvas',
     canvas: Object.assign(document.createElement('canvas'), { width: 1, height: 1 }),
@@ -139,6 +141,7 @@ layers.push(
     source: 'dem',
     paint: { 'color-relief-opacity': Number(ui.opacity.shade.value), 'color-relief-color': reliefExpression() },
   },
+  canvasLayer('slope'),
   canvasLayer('aspect'),
   canvasLayer('sun'),
   { id: 'roads', type: 'raster', source: 'roads', layout: { visibility: 'none' } },
@@ -179,16 +182,18 @@ const setVisible = (id, on) => map.setLayoutProperty(id, 'visibility', on ? 'vis
 
 // ---------- Elevation shading ----------
 
-// Colors everything at or above the threshold, ramping up to the highest point
-// in view. Below the threshold is transparent.
+// Colors the band between the low and high handles, ramping yellow to red
+// across it. Outside the band is transparent. With the low handle at the
+// bottom everything below is included; with the high handle at the top there
+// is no upper limit.
 function reliefExpression() {
   const lo = state.min ?? 0;
   const hi = state.max ?? 4500;
   const start = state.threshold == null ? lo : Math.max(state.threshold, lo);
-  const end = Math.max(hi, start + 1);
+  const end = Math.max(state.thresholdHigh ?? hi, start + 1);
   const expr = ['interpolate', ['linear'], ['elevation']];
   if (state.threshold == null) {
-    // Slider at minimum: shade everything, including anything below the sampled minimum.
+    // Low handle at minimum: shade everything, including anything below the sampled minimum.
     expr.push(-12000, RAMP[0]);
   } else {
     expr.push(start - 0.5, 'rgba(0,0,0,0)');
@@ -198,6 +203,7 @@ function reliefExpression() {
     // Stops must be strictly increasing.
     expr.push(i === 0 && state.threshold == null ? Math.max(stop, -11999) : stop, color);
   });
+  if (state.thresholdHigh != null) expr.push(end + 0.5, 'rgba(0,0,0,0)');
   return expr;
 }
 
@@ -279,9 +285,12 @@ async function computeViewStats() {
   state.min = min;
   state.max = max;
   state.peak = [xToLng(peak[0], r.n), yToLat(peak[1], r.n)];
-  // Keep an absolute threshold across pans; drop it if it now falls below the view minimum.
+  // Keep the band in absolute elevations across pans, but let an end that
+  // falls outside the new view's range go back to "open".
   if (state.threshold != null && state.threshold <= min) state.threshold = null;
   if (state.threshold != null && state.threshold > max) state.threshold = max;
+  if (state.thresholdHigh != null && state.thresholdHigh >= max) state.thresholdHigh = null;
+  if (state.thresholdHigh != null && state.thresholdHigh < (state.threshold ?? min)) state.thresholdHigh = state.threshold ?? min;
   syncSlider();
   updateShading();
 
@@ -293,62 +302,72 @@ const toUnits = (m) => (state.units === 'ft' ? m * M_TO_FT : m);
 const fromUnits = (v) => (state.units === 'ft' ? v / M_TO_FT : v);
 const fmt = (m) => `${Math.round(toUnits(m)).toLocaleString()} ${state.units}`;
 
+const elevRange = new DualRange($('elev-range'), (lo, hi, moved) => {
+  if (!ui.shade.checked) overlays.shade.set(true);
+  const [min, max] = [Number(ui.threshold.min), Number(ui.threshold.max)];
+  // Only the handle that moved changes, so a typed value on the other end stays exact.
+  if (moved === 'lo' || lo === hi) state.threshold = lo <= min ? null : fromUnits(lo);
+  if (moved === 'hi' || lo === hi) state.thresholdHigh = hi >= max ? null : fromUnits(hi);
+  syncThresholdField();
+  paintThresholdTrack();
+  updateShading();
+});
+
 function syncSlider() {
   if (state.min == null) return;
   const lo = Math.floor(toUnits(state.min));
-  const hi = Math.ceil(toUnits(state.max));
-  const span = Math.max(1, hi - lo);
-  const s = ui.threshold;
-  s.disabled = false;
-  s.min = lo;
-  s.max = hi;
-  s.step = span > 2000 ? 10 : 1;
-  s.value = state.threshold == null ? lo : toUnits(state.threshold);
-  ui.rangeMin.textContent = fmt(state.min);
-  ui.rangeMax.textContent = fmt(state.max);
+  const step = toUnits(state.max) - lo > 2000 ? 10 : 1;
+  // Round the top up to a whole step so the high handle can reach it.
+  const hi = lo + Math.ceil((toUnits(state.max) - lo) / step) * step;
+  elevRange.setRange(lo, hi, step);
+  elevRange.setValues(
+    state.threshold == null ? lo : toUnits(state.threshold),
+    state.thresholdHigh == null ? hi : toUnits(state.thresholdHigh),
+  );
   syncThresholdField();
   ui.peak.disabled = false;
   ui.peak.textContent = `Highest in view: ${fmt(state.max)}`;
   paintThresholdTrack();
 }
 
-// Gray up to the thumb, then the same yellow-to-red ramp the map uses for
-// the shaded range above it.
+// Gray outside the band, and inside it the same yellow-to-red ramp the map uses.
 function paintThresholdTrack() {
-  const s = ui.threshold;
-  const span = Number(s.max) - Number(s.min);
-  const p = span > 0 ? ((Number(s.value) - Number(s.min)) / span) * 100 : 0;
-  const stops = RAMP.map((c, i) => `${c} ${(p + ((100 - p) * i) / (RAMP.length - 1)).toFixed(2)}%`);
-  s.style.background = `linear-gradient(to right, var(--border) 0 ${p.toFixed(2)}%, ${stops.join(', ')})`;
+  const [a, b] = elevRange.percents;
+  const stops = RAMP.map((c, i) => `${c} ${(a + ((b - a) * i) / (RAMP.length - 1)).toFixed(2)}%`);
+  elevRange.paint(`linear-gradient(to right, var(--border) 0 ${a.toFixed(2)}%, ${stops.join(', ')}, var(--border) ${b.toFixed(2)}% 100%)`);
 }
 
-ui.threshold.addEventListener('input', () => {
-  if (!ui.shade.checked) overlays.shade.set(true);
-  const v = Number(ui.threshold.value);
-  state.threshold = v <= Number(ui.threshold.min) ? null : fromUnits(v);
-  syncThresholdField();
-  paintThresholdTrack();
-  updateShading();
-});
-
-// Typed elevation: blank or at/below the view minimum means "everything".
+// Typed band ends. Blank, or beyond the lowest/highest in view, means open.
 function syncThresholdField() {
-  ui.thresholdValue.disabled = false;
-  ui.thresholdValue.value = state.threshold == null ? '' : String(Math.round(toUnits(state.threshold)));
-  $('threshold-unit').textContent = state.units;
+  for (const [input, v, auto] of [
+    [ui.thresholdValue, state.threshold, state.min],
+    [ui.thresholdHighValue, state.thresholdHigh, state.max],
+  ]) {
+    input.disabled = false;
+    if (document.activeElement !== input) input.value = v == null ? '' : String(Math.round(toUnits(v)));
+    input.placeholder = auto == null ? '' : String(Math.round(toUnits(auto)));
+  }
+  document.querySelectorAll('.range-ends .unit').forEach((el) => (el.textContent = state.units));
 }
-ui.thresholdValue.addEventListener('change', () => {
-  if (state.min == null) return;
-  if (!ui.shade.checked) overlays.shade.set(true);
-  const v = Number(ui.thresholdValue.value);
-  if (ui.thresholdValue.value === '' || !Number.isFinite(v) || v <= toUnits(state.min)) state.threshold = null;
-  else state.threshold = Math.min(fromUnits(v), state.max);
-  syncSlider();
-  updateShading();
-});
-ui.thresholdValue.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') ui.thresholdValue.blur();
-});
+for (const [input, key] of [[ui.thresholdValue, 'threshold'], [ui.thresholdHighValue, 'thresholdHigh']]) {
+  input.addEventListener('change', () => {
+    if (state.min == null) return;
+    if (!ui.shade.checked) overlays.shade.set(true);
+    const v = fromUnits(Number(input.value));
+    const blank = input.value === '' || !Number.isFinite(v);
+    if (key === 'threshold') {
+      state.threshold = blank || v <= state.min ? null : Math.min(v, state.thresholdHigh ?? state.max);
+    } else {
+      state.thresholdHigh = blank || v >= state.max ? null : Math.max(v, state.threshold ?? state.min);
+    }
+    input.blur();
+    syncSlider();
+    updateShading();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.blur();
+  });
+}
 
 ui.peak.addEventListener('click', () => {
   if (state.peak) map.flyTo({ center: state.peak, zoom: Math.max(map.getZoom(), 12) });
@@ -477,13 +496,14 @@ function refreshCanvasSource(id) {
   requestAnimationFrame(() => requestAnimationFrame(() => source.pause()));
 }
 
-const RENDERER_CLASSES = { sun: SunRenderer, aspect: AspectRenderer };
+const RENDERER_CLASSES = { sun: SunRenderer, aspect: AspectRenderer, slope: SlopeRenderer };
+const RENDERER_MESSAGES = { sun: 'sun-info', aspect: 'aspect-label', slope: 'slope-note' };
 function ensureRenderer(id) {
   if (!renderers[id]) {
     try {
       renderers[id] = new RENDERER_CLASSES[id](map.getSource(id).getCanvas());
     } catch (e) {
-      (id === 'sun' ? ui.sunInfo : $('aspect-label')).textContent = `Needs WebGL2: ${e.message}`;
+      $(RENDERER_MESSAGES[id]).textContent = `Needs WebGL2: ${e.message}`;
     }
   }
   return renderers[id];
@@ -493,7 +513,7 @@ function ensureRenderer(id) {
 // the view still cast shadows into it, and hands it to the enabled overlays.
 let gridRun = 0;
 async function updateTerrainGrid() {
-  const ids = ['sun', 'aspect'].filter((id) => ui[id].checked && ensureRenderer(id));
+  const ids = ['sun', 'aspect', 'slope'].filter((id) => ui[id].checked && ensureRenderer(id));
   if (!ids.length) return;
   const run = ++gridRun;
   const MAX_SIDE = 7; // tiles per side including margin, 1792 px
@@ -544,6 +564,7 @@ async function updateTerrainGrid() {
   }
   if (ids.includes('sun')) drawSun();
   if (ids.includes('aspect')) drawAspect();
+  if (ids.includes('slope')) drawSlope();
 }
 
 ui.sunTime.addEventListener('input', () => {
@@ -720,6 +741,73 @@ $('aspect-invert').addEventListener('click', () => {
 
 drawCompass();
 
+// ---------- Slope angle ----------
+// Colors slopes by steepness in the avalanche-terrain classes, limited to a
+// chosen range of angles. 60 on the slider means "60° and steeper".
+
+const slope = { min: 27, max: 60 };
+const SLOPE_TOP = 60;
+const slopeRange = new DualRange($('slope-range'), (lo, hi) => {
+  if (!ui.slope.checked) overlays.slope.set(true);
+  slope.min = lo;
+  slope.max = hi;
+  drawSlope();
+});
+
+// Class colors along the track inside the chosen range, gray outside it.
+function paintSlopeTrack() {
+  const pct = (deg) => ((Math.min(deg, SLOPE_TOP) / SLOPE_TOP) * 100).toFixed(2);
+  const stops = [];
+  SLOPE_CLASSES.forEach((c, i) => {
+    const next = SLOPE_CLASSES[i + 1]?.from ?? SLOPE_TOP + 1;
+    const from = Math.max(c.from, slope.min);
+    const to = Math.min(next, slope.max + 1);
+    if (to > from) stops.push(`${c.color} ${pct(from)}% ${pct(to)}%`);
+  });
+  slopeRange.paint(`linear-gradient(to right, var(--border) 0 ${pct(slope.min)}%, ${stops.join(', ')}, var(--border) ${pct(slope.max + 1)}% 100%)`);
+}
+
+function drawSlope() {
+  slopeRange.setValues(slope.min, slope.max);
+  paintSlopeTrack();
+  for (const [id, v] of [['slope-min-value', slope.min], ['slope-max-value', slope.max]]) {
+    if (document.activeElement !== $(id)) $(id).value = v;
+  }
+  $('slope-max-value').title = slope.max >= SLOPE_TOP ? '60 means 60° and steeper' : '';
+  // Coarse terrain data smooths slopes out, so angles read low when zoomed out.
+  $('slope-note').textContent =
+    ui.slope.checked && map.getZoom() < 12.5 ? 'Zoom in closer for accurate angles; they read low when zoomed out.' : '';
+  if (!ui.slope.checked || !renderers.slope?.grid) return;
+  renderers.slope.render(slope.min, slope.max);
+  refreshCanvasSource('slope');
+}
+
+for (const [id, key] of [['slope-min-value', 'min'], ['slope-max-value', 'max']]) {
+  const input = $(id);
+  input.addEventListener('change', () => {
+    const v = Math.round(Number(input.value));
+    if (input.value !== '' && Number.isFinite(v)) {
+      if (!ui.slope.checked) overlays.slope.set(true);
+      const clamped = Math.max(0, Math.min(SLOPE_TOP, v));
+      if (key === 'min') slope.min = Math.min(clamped, slope.max);
+      else slope.max = Math.max(clamped, slope.min);
+    }
+    input.blur();
+    drawSlope();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.blur();
+  });
+}
+
+// Angle labels under the slider.
+$('slope-scale').replaceChildren(
+  ...[0, 20, 30, 45, 60].map((deg) =>
+    Object.assign(document.createElement('span'), { textContent: deg === 60 ? '60°+' : `${deg}°`, style: `left: ${(deg / SLOPE_TOP) * 100}%` }),
+  ),
+);
+drawSlope();
+
 // ---------- Overlay toggles ----------
 // Each overlay has a checkbox in the panel and a button in the slide-out bar;
 // both go through set() so they stay in sync.
@@ -748,6 +836,14 @@ const overlays = {
     apply(on) {
       setVisible('aspect', on);
       if (on) updateTerrainGrid();
+    },
+  },
+  slope: {
+    input: ui.slope,
+    apply(on) {
+      setVisible('slope', on);
+      if (on) updateTerrainGrid();
+      drawSlope();
     },
   },
   hillshade: { input: ui.hillshade, apply: (on) => setVisible('hillshade', on) },
@@ -794,7 +890,12 @@ layerbarToggle.addEventListener('click', () => setLayerbarOpen(!layerbar.classLi
 
 // ---------- Opacity and hillshade strength ----------
 
-const OPACITY_PROPS = { shade: ['elevation-shading', 'color-relief-opacity'], sun: ['sun', 'raster-opacity'], aspect: ['aspect', 'raster-opacity'] };
+const OPACITY_PROPS = {
+  shade: ['elevation-shading', 'color-relief-opacity'],
+  sun: ['sun', 'raster-opacity'],
+  aspect: ['aspect', 'raster-opacity'],
+  slope: ['slope', 'raster-opacity'],
+};
 for (const [id, input] of Object.entries(ui.opacity)) {
   input.addEventListener('input', () => {
     map.setPaintProperty(...OPACITY_PROPS[id], Number(input.value));
@@ -821,7 +922,7 @@ document.querySelectorAll('input[name=units]').forEach((el) =>
     state.units = el.value;
     syncSlider();
     syncThresholdField();
-    if (profileVertices.length > 1) refreshProfile();
+    if (route.legs.length) refreshProfile();
   }),
 );
 
@@ -879,7 +980,11 @@ const popup = new maplibregl.Popup({ maxWidth: '260px', focusAfterOpen: false })
 let infoRun = 0;
 
 map.on('click', async (e) => {
-  if (profiling) return addProfileVertex(e.lngLat);
+  if (profiling) {
+    // Draw mode handles its own taps through the stroke code.
+    if (profileMode === 'pan') addStraightLeg([e.lngLat.lng, e.lngLat.lat]);
+    return;
+  }
   const run = ++infoRun;
   const { lng, lat } = e.lngLat.wrap();
   const date = ui.sunDate.value || todayIn(browserTz);
@@ -916,16 +1021,19 @@ map.on('click', async (e) => {
 });
 
 // ---------- Elevation profile ----------
-// A drawing mode: each tap adds a vertex, the chart shows the profile with a
-// marker at every vertex, and hovering the chart shows the spot on the map.
+// The route is a start point plus legs. In Draw mode dragging on the map draws
+// a freehand leg and a tap adds a straight one; in Move-map mode dragging pans
+// and taps still add straight legs. Each leg is one segment on the chart.
 
 let profiling = false;
-const profileVertices = []; // [lng, lat]
-const vertexMarkers = [];
+let profileMode = 'draw';
+const route = { start: null, legs: [] }; // points are [lng, lat]
+let boundaryMarkers = [];
 const hoverMarker = marker('hover-marker', '');
 const profileSheet = $('profile-sheet');
 const profileTool = $('profile-tool');
 let profileRun = 0;
+const routeEnd = () => (route.legs.length ? route.legs[route.legs.length - 1].at(-1) : route.start);
 
 const fmtDist = (m) =>
   state.units === 'ft'
@@ -936,60 +1044,162 @@ const fmtDist = (m) =>
       ? `${Math.round(m)} m`
       : `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
 
+// Map gestures that would fight with drawing are off while Draw mode is active.
+function applyProfileMode() {
+  const drawing = profiling && profileMode === 'draw';
+  document.body.classList.toggle('profile-draw', drawing);
+  for (const h of [map.dragPan, map.doubleClickZoom]) drawing ? h.disable() : h.enable();
+  $('profile-mode-draw').setAttribute('aria-pressed', String(profileMode === 'draw'));
+  $('profile-mode-pan').setAttribute('aria-pressed', String(profileMode === 'pan'));
+  updateProfileHint();
+}
+$('profile-mode-draw').addEventListener('click', () => {
+  profileMode = 'draw';
+  applyProfileMode();
+});
+$('profile-mode-pan').addEventListener('click', () => {
+  profileMode = 'pan';
+  applyProfileMode();
+});
+
+function updateProfileHint() {
+  $('profile-hint').textContent = !route.start
+    ? profileMode === 'draw'
+      ? 'Drag on the map to draw, or tap to start'
+      : 'Tap the map to add points'
+    : profileMode === 'draw'
+      ? 'Drag to draw the next segment, tap for a straight one'
+      : 'Tap to add a straight segment';
+}
+
 function setProfiling(on) {
   profiling = on;
   document.body.classList.toggle('profiling', on);
   profileTool.setAttribute('aria-pressed', String(on));
   profileSheet.classList.toggle('open', on);
   profileSheet.setAttribute('aria-hidden', String(!on));
-  if (on) {
-    popup.remove();
-  } else {
-    clearProfile();
-  }
+  if (on) popup.remove();
+  else clearProfile();
+  applyProfileMode();
   updateSheetHeight();
 }
 profileTool.addEventListener('click', () => setProfiling(!profiling));
 $('profile-close').addEventListener('click', () => setProfiling(false));
 
 function clearProfile() {
-  profileVertices.length = 0;
-  vertexMarkers.splice(0).forEach((m) => m.remove());
+  route.start = null;
+  route.legs.length = 0;
   hoverMarker.remove();
-  map.getSource('profile-line')?.setData({ type: 'FeatureCollection', features: [] });
   refreshProfile();
 }
 $('profile-clear').addEventListener('click', clearProfile);
 $('profile-undo').addEventListener('click', () => {
-  profileVertices.pop();
-  vertexMarkers.pop()?.remove();
+  if (route.legs.length) route.legs.pop();
+  else route.start = null;
   refreshProfile();
 });
 
-function addProfileVertex(lngLat) {
-  const v = [lngLat.lng, lngLat.lat];
-  profileVertices.push(v);
-  const el = Object.assign(document.createElement('div'), { className: 'vertex-marker', textContent: String(profileVertices.length) });
-  vertexMarkers.push(new maplibregl.Marker({ element: el }).setLngLat(v).addTo(map));
+// A tap adds a straight leg from the end of the route (or starts it).
+function addStraightLeg(p) {
+  if (!route.start) route.start = p;
+  else route.legs.push([routeEnd(), p]);
   refreshProfile();
 }
 
-async function refreshProfile() {
-  const n = profileVertices.length;
-  $('profile-undo').disabled = n === 0;
-  $('profile-clear').disabled = n === 0;
-  $('profile-hint').textContent = n === 0 ? 'Tap the map to add points' : n === 1 ? 'Tap again to add the next point' : 'Tap to extend the line';
+// Everything drawn so far, plus the stroke in progress, as one line.
+function showRouteLine(extra = []) {
+  const coords = route.start ? [route.start, ...route.legs.flatMap((leg) => leg.slice(1)), ...extra] : extra;
   map.getSource('profile-line')?.setData({
     type: 'FeatureCollection',
-    features: n > 1 ? [{ type: 'Feature', geometry: { type: 'LineString', coordinates: profileVertices } }] : [],
+    features: coords.length > 1 ? [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }] : [],
   });
-  $('profile-body').classList.toggle('open', n >= 2);
+}
+
+// ----- Freehand drawing -----
+const canvasBox = map.getCanvasContainer();
+let stroke = null; // { id, pts: [[x, y]], moved }
+const eventXY = (e) => {
+  const r = canvasBox.getBoundingClientRect();
+  return [e.clientX - r.left, e.clientY - r.top];
+};
+let strokeFrame = 0;
+function previewStroke() {
+  if (strokeFrame) return;
+  strokeFrame = requestAnimationFrame(() => {
+    strokeFrame = 0;
+    if (stroke) showRouteLine(stroke.pts.map((pt) => map.unproject(pt).toArray()));
+  });
+}
+canvasBox.addEventListener('pointerdown', (e) => {
+  if (!profiling || profileMode !== 'draw') return;
+  if (!e.isPrimary) {
+    // A second finger means a pinch: drop the stroke and let the map zoom.
+    stroke = null;
+    showRouteLine();
+    return;
+  }
+  if (e.button !== 0) return;
+  stroke = { id: e.pointerId, pts: [eventXY(e)], moved: 0 };
+  canvasBox.setPointerCapture(e.pointerId);
+});
+canvasBox.addEventListener('pointermove', (e) => {
+  if (!stroke || e.pointerId !== stroke.id) return;
+  const pt = eventXY(e);
+  const last = stroke.pts[stroke.pts.length - 1];
+  const step = Math.hypot(pt[0] - last[0], pt[1] - last[1]);
+  if (step < 3) return;
+  stroke.moved += step;
+  stroke.pts.push(pt);
+  previewStroke();
+});
+function endStroke(e) {
+  if (!stroke || e.pointerId !== stroke.id) return;
+  const s = stroke;
+  stroke = null;
+  if (e.type === 'pointercancel') return showRouteLine();
+  if (s.moved < 8) return addStraightLeg(map.unproject(s.pts[0]).toArray()); // a tap
+  let pts = simplify(s.pts, 1.5).map((pt) => map.unproject(pt).toArray());
+  if (!route.start) {
+    route.start = pts[0];
+  } else {
+    // Continue from the route's end; a stroke started right on it snaps there,
+    // one started elsewhere is joined with a straight line.
+    const end = routeEnd();
+    const endPx = map.project(end);
+    const startPx = s.pts[0];
+    if (Math.hypot(endPx.x - startPx[0], endPx.y - startPx[1]) < 24) pts = pts.slice(1);
+    pts = [end, ...pts];
+  }
+  if (pts.length > 1) route.legs.push(pts);
+  refreshProfile();
+}
+canvasBox.addEventListener('pointerup', endStroke);
+canvasBox.addEventListener('pointercancel', endStroke);
+
+function drawBoundaryMarkers() {
+  boundaryMarkers.forEach((m) => m.remove());
+  const points = route.start ? [route.start, ...route.legs.map((leg) => leg.at(-1))] : [];
+  boundaryMarkers = points.map((p, i) =>
+    new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'vertex-marker', textContent: String(i + 1) }) })
+      .setLngLat(p)
+      .addTo(map),
+  );
+}
+
+async function refreshProfile() {
+  const n = route.legs.length;
+  $('profile-undo').disabled = !route.start;
+  $('profile-clear').disabled = !route.start;
+  updateProfileHint();
+  showRouteLine();
+  drawBoundaryMarkers();
+  $('profile-body').classList.toggle('open', n >= 1);
   updateSheetHeight();
-  if (n < 2) return;
+  if (n < 1) return;
 
   const run = ++profileRun;
   $('profile-readout').textContent = 'Loading elevation…';
-  const profile = await sampleProfile(profileVertices);
+  const profile = await sampleProfile(route.legs);
   if (run !== profileRun || !profile) return;
 
   drawProfileChart($('profile-chart'), profile, {
@@ -1035,6 +1245,7 @@ map.on('moveend', () => {
     computeViewStats();
     updateSunRange();
     updateTerrainGrid();
+    drawSlope();
   }, 150);
 });
 if ('serviceWorker' in navigator) {

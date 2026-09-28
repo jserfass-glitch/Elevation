@@ -1,5 +1,5 @@
-// Elevation profile along a line the user draws, one tap per vertex. The
-// chart marks every vertex so each segment can be read on its own.
+// Elevation profile along a route the user draws: freehand strokes or
+// straight taps. The chart marks where each segment starts and ends.
 
 import { DEM_MAX_ZOOM, areaSampler, lngToX, latToY, pixelMeters } from './dem.js';
 
@@ -16,46 +16,68 @@ export function haversine([lng1, lat1], [lng2, lat2]) {
 }
 
 /**
- * Samples elevation along a polyline of [lng, lat] vertices.
- * Returns { points: [{ d, elev, lngLat, seg }], vertices: [{ d, elev, i }], segments: [{ d0, d1, length, gain, loss }], gain, loss, length }
- * with distances in meters.
+ * Samples elevation along a route made of legs. Each leg is a polyline of
+ * [lng, lat] points (two points for a straight tap, many for a drawn stroke)
+ * and starts where the previous one ended; leg ends are the numbered
+ * boundaries on the chart.
+ * Returns { points: [{ d, elev, lngLat, seg }], vertices: [{ d, elev, i }],
+ * segments: [{ d0, d1, length, gain, loss }], gain, loss, length } in meters.
  */
-export async function sampleProfile(vertices) {
-  const lengths = vertices.slice(1).map((v, i) => haversine(vertices[i], v));
+export async function sampleProfile(legs) {
+  legs = legs.filter((leg) => leg.length > 1);
+  const cums = legs.map((leg) => {
+    const c = [0];
+    for (let k = 1; k < leg.length; k++) c.push(c[k - 1] + haversine(leg[k - 1], leg[k]));
+    return c;
+  });
+  const lengths = cums.map((c) => c[c.length - 1]);
   const total = lengths.reduce((a, b) => a + b, 0);
-  if (total === 0) return null;
+  if (!legs.length || total === 0) return null;
   const spacing = Math.max(SAMPLE_M, total / MAX_SAMPLES);
 
-  // One sampler covers the whole line, at the finest zoom that keeps the
+  // One sampler covers the whole route, at the finest zoom that keeps the
   // tile count sensible.
-  const lngs = vertices.map((v) => v[0]);
-  const lats = vertices.map((v) => v[1]);
+  const all = legs.flat();
+  const lngs = all.map((v) => v[0]);
+  const lats = all.map((v) => v[1]);
   const center = [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
-  const radius = Math.max(...vertices.map((v) => haversine(center, v))) + 200;
+  const radius = Math.max(...all.map((v) => haversine(center, v))) + 200;
   let z = DEM_MAX_ZOOM;
   while (z > 8 && (radius / pixelMeters(z, center[1]) / 256) * 2 > 6) z--;
   const s = await areaSampler(z, center[0], center[1], radius);
   const n = 2 ** z;
   const elevAt = ([lng, lat]) => s.sample(lngToX(lng, n) * 256, latToY(lat, n) * 256);
 
+  // Position `dist` meters along leg i.
+  const along = (i, dist) => {
+    const leg = legs[i];
+    const c = cums[i];
+    let k = 1;
+    while (k < c.length - 1 && c[k] < dist) k++;
+    const span = c[k] - c[k - 1] || 1;
+    const t = Math.max(0, Math.min(1, (dist - c[k - 1]) / span));
+    const a = leg[k - 1];
+    const b = leg[k];
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  };
+
   const points = [];
   const verts = [];
   const segments = [];
   let d = 0;
-  for (let i = 0; i < vertices.length - 1; i++) {
-    const a = vertices[i];
-    const b = vertices[i + 1];
+  for (let i = 0; i < legs.length; i++) {
     const len = lengths[i];
     const steps = Math.max(1, Math.round(len / spacing));
     const seg = { d0: d, d1: d + len, length: len, gain: 0, loss: 0 };
+    const last = i === legs.length - 1;
     let prev = null;
+    // The last sample of a leg is the first of the next, so only the final
+    // leg emits its end point; its elevation still counts toward this leg.
     for (let k = 0; k <= steps; k++) {
-      if (k === steps && i < vertices.length - 2) break; // shared with the next segment's first sample
-      const t = k / steps;
-      const lngLat = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const lngLat = along(i, (len * k) / steps);
       const elev = elevAt(lngLat);
       if (k === 0) verts.push({ d, elev, i });
-      points.push({ d: d + len * t, elev, lngLat, seg: i });
+      if (k < steps || last) points.push({ d: d + (len * k) / steps, elev, lngLat, seg: i });
       if (prev != null && Number.isFinite(elev) && Number.isFinite(prev)) {
         const diff = elev - prev;
         if (diff > 0) seg.gain += diff;
@@ -63,23 +85,44 @@ export async function sampleProfile(vertices) {
       }
       prev = elev;
     }
-    // The next segment's first sample is this segment's last point; count that step too.
-    if (i < vertices.length - 2) {
-      const endElev = elevAt(b);
-      if (Number.isFinite(endElev) && Number.isFinite(prev)) {
-        const diff = endElev - prev;
-        if (diff > 0) seg.gain += diff;
-        else seg.loss -= diff;
-      }
-    }
     segments.push(seg);
     d += len;
   }
-  const last = vertices[vertices.length - 1];
-  verts.push({ d, elev: elevAt(last), i: vertices.length - 1 });
+  const end = legs[legs.length - 1];
+  verts.push({ d, elev: elevAt(end[end.length - 1]), i: legs.length });
   const gain = segments.reduce((a, s2) => a + s2.gain, 0);
   const loss = segments.reduce((a, s2) => a + s2.loss, 0);
   return { points, vertices: verts, segments, gain, loss, length: total };
+}
+
+/** Douglas-Peucker simplification of [x, y] screen points. */
+export function simplify(pts, tolerance) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const [ax, ay] = pts[a];
+    const [bx, by] = pts[b];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    let worst = -1;
+    let worstD = tolerance;
+    for (let k = a + 1; k < b; k++) {
+      const dist = Math.abs(dy * pts[k][0] - dx * pts[k][1] + bx * ay - by * ax) / len;
+      if (dist > worstD) {
+        worst = k;
+        worstD = dist;
+      }
+    }
+    if (worst > 0) {
+      keep[worst] = 1;
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  return pts.filter((_, k) => keep[k]);
 }
 
 /**

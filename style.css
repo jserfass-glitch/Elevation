@@ -227,8 +227,77 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 .value-field input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .value-field input[type="time"] { width: auto; text-align: left; }
 .value-field input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
-.value-field input::placeholder { color: var(--fg); opacity: 1; font-weight: 600; }
-#threshold-value { width: 5.5em; }
+/* Placeholders show the automatic value (the lowest or highest in view). */
+.value-field input::placeholder { color: var(--muted); opacity: 1; font-weight: 600; }
+.range-fields { gap: 2px; }
+.range-fields input[type="number"] { width: 3.4em; }
+#slope-section .range-fields input[type="number"] { width: 2.2em; }
+/* Elevation band ends sit under the slider's two ends. */
+.range-ends { margin-top: 0; }
+.range-ends input[type="number"] { width: 4.2em; }
+.range-ends .value-field:first-child input { text-align: left; }
+
+/* Two-handle slider: two range inputs stacked on one painted track. Only the
+   thumbs take pointer input. */
+.dual-range {
+  position: relative;
+  height: 24px;
+  margin: 4px 0 2px;
+  --track: var(--border);
+  --thumb: var(--accent);
+}
+.dual-range::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--track);
+}
+.dual-range input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+.dual-range input::-webkit-slider-runnable-track { background: transparent; height: 24px; }
+.dual-range input::-moz-range-track { background: transparent; }
+.dual-range input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--thumb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.dual-range input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--thumb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.dual-range input:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--fg); outline-offset: 1px; }
+#slope-range { --thumb: #374151; }
+
+/* Angle labels under the slope slider, placed by JS. */
+.scale { position: relative; height: 14px; margin: 0 10px 4px; }
+.scale span { position: absolute; transform: translateX(-50%); font-size: 11px; white-space: nowrap; }
+#slope-note:empty { display: none; }
 .aspect-fields { justify-content: flex-start; margin: 2px 0 4px; }
 .aspect-fields input { width: 3em; }
 
@@ -304,6 +373,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 #layerbar-items [data-overlay="sun"][aria-pressed="true"] { background: #1f2f6b; }
 #layerbar-items [data-overlay="aspect"][aria-pressed="true"] { background: var(--aspect); }
 #layerbar-items [data-overlay="hillshade"][aria-pressed="true"] { background: #4b5563; }
+#layerbar-items [data-overlay="slope"][aria-pressed="true"] { background: #dc2626; }
 
 #layerbar-items hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--border); }
 #profile-tool[aria-pressed="true"] { color: #fff; background: #0e7490; }
@@ -324,6 +394,12 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   transition: transform var(--dur) var(--ease), opacity var(--dur) var(--ease), visibility 0s var(--dur);
 }
 #profile-sheet.open { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+.profile-tools { display: flex; align-items: center; gap: 10px; padding: 0 12px 8px; flex-wrap: wrap; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.segmented button { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 0; height: 28px; padding: 0 10px; font-size: 13px; }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button svg { width: 16px; height: 16px; }
+.segmented button[aria-pressed="true"] { background: #0e7490; color: #fff; }
 #profile-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur) var(--ease); }
 #profile-body.open { grid-template-rows: 1fr; }
 #profile-inner { min-height: 0; overflow: hidden; }
@@ -353,7 +429,9 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 .gain { color: #b91c1c; }
 .loss { color: #1d4ed8; }
 
-body.profiling #map { cursor: crosshair; }
+body.profiling #map .maplibregl-canvas-container { cursor: crosshair; }
+/* Drawing: one finger draws, so the browser must not treat it as a pan. */
+body.profile-draw #map .maplibregl-canvas-container { touch-action: none !important; cursor: crosshair; }
 .vertex-marker {
   width: 20px;
   height: 20px;

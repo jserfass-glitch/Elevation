@@ -4,7 +4,7 @@
 // host returns a server error. Map and terrain
 // tiles come from other origins and are left to the browser.
 
-const CACHE = 'elevation-app-v2';
+const CACHE = 'elevation-app-v3';
 const APP_FILES = [
   './',
   'index.html',
@@ -15,6 +15,8 @@ const APP_FILES = [
   'sun.js',
   'search.js',
   'pointinfo.js',
+  'profile.js',
+  'dualrange.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

@@ -4,6 +4,7 @@
 // between it and the sun rises above the ray toward the sun (cast shadows).
 // AspectRenderer: a pixel is shaded when the direction its slope faces falls
 // inside a compass arc.
+// SlopeRenderer: colors slopes by steepness within a chosen range of angles.
 
 const VERTEX = `#version 300 es
 in vec2 aPos;
@@ -118,6 +119,46 @@ void main() {
   outColor = vec4(uColor * a, a); // premultiplied
 }`;
 
+// Slope-angle classes (degrees), the avalanche-terrain convention used by
+// CalTopo and others above 27°. Shared with the panel legend and slider.
+export const SLOPE_CLASSES = [
+  { from: 0, color: '#c7e9b4' },
+  { from: 20, color: '#74c476' },
+  { from: 27, color: '#ffe600' },
+  { from: 30, color: '#ffb000' },
+  { from: 32, color: '#ff7a00' },
+  { from: 35, color: '#e3262b' },
+  { from: 46, color: '#a23bd6' },
+  { from: 51, color: '#1f5fff' },
+  { from: 60, color: '#111111' },
+];
+const glslColor = (hex) =>
+  `vec3(${[1, 3, 5].map((i) => (parseInt(hex.slice(i, i + 2), 16) / 255).toFixed(3)).join(', ')})`;
+
+const SLOPE_FRAGMENT = `${COMMON}
+uniform float uMinDeg;    // shade slopes from this angle...
+uniform float uMaxDeg;    // ...up to this one (90 = no upper limit)
+
+vec3 classColor(float deg) {
+${[...SLOPE_CLASSES].reverse().map((c) => `  if (deg >= ${c.from.toFixed(1)}) return ${glslColor(c.color)};`).join('\n')}
+  return vec3(0.0);
+}
+
+void main() {
+  ivec2 p = gridPixel();
+  outColor = vec4(0.0);
+  // Light 3x3 smoothing of the gradient: DEM stair-steps otherwise show up as
+  // stripes when cut into angle classes.
+  float pix = pixelMeters(p);
+  vec2 grad = vec2(0.0);
+  for (int dy = -1; dy <= 1; dy++)
+    for (int dx = -1; dx <= 1; dx++) grad += gradient(p + ivec2(dx, dy), pix) * float((2 - abs(dx)) * (2 - abs(dy)));
+  float deg = degrees(atan(length(grad / 16.0)));
+  if (deg < uMinDeg || deg > uMaxDeg) return;
+  float a = 0.85;
+  outColor = vec4(classColor(deg) * a, a); // premultiplied
+}`;
+
 function compile(gl, type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -221,6 +262,20 @@ export class AspectRenderer extends GridRenderer {
     const span = (((toDeg - fromDeg) % 360) + 360) % 360;
     this.gl.uniform1f(this.u.uFrom, (fromDeg * Math.PI) / 180);
     this.gl.uniform1f(this.u.uSpan, ((span || 360) * Math.PI) / 180);
+    this.draw();
+  }
+}
+
+export class SlopeRenderer extends GridRenderer {
+  constructor(canvas) {
+    super(canvas, SLOPE_FRAGMENT, ['uMinDeg', 'uMaxDeg'], [0, 0, 0]);
+  }
+
+  /** Shades slopes between `minDeg` and `maxDeg` degrees; maxDeg >= 60 means no upper limit. */
+  render(minDeg, maxDeg) {
+    if (!this.grid) return;
+    this.gl.uniform1f(this.u.uMinDeg, minDeg);
+    this.gl.uniform1f(this.u.uMaxDeg, maxDeg >= 60 ? 90 : maxDeg + 0.999);
     this.draw();
   }
 }
