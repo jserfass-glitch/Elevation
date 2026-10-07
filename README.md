@@ -11,6 +11,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 - Each shading feature has its own on/off checkbox and opacity slider. Elevations, the time of day, compass angles and slope angles can also be typed in exactly.
 - **Tap or click the map** for a popup with coordinates, elevation, which way the slope faces, and hours of direct sun on the sun-exposure date. The sun hours account for the slope and for terrain up to 30 km away blocking the sun.
 - **Elevation profile** (chart button at the bottom of the overlay bar): in Draw mode, drag on the map to draw the route freehand, and tap to add a straight segment instead; each stroke or tap is one segment. Move map mode lets dragging pan again, and taps still add straight segments. Pinch zoom works while drawing. The profile appears in a sheet. Every point is numbered on the map and the chart, with a dashed line at each segment boundary, and each segment's length, gain and loss is listed. Hovering or dragging on the chart shows that spot on the map. Undo removes the last point.
+- **Offline maps** (download button at the bottom of the overlay bar): saves USGS Topo and elevation data for the dashed box on screen, with a size estimate first. Standard detail saves topo to zoom 15 and elevation to zoom 14; Full saves one zoom further. Every shading tool, the tap popup (including sun hours) and the profile then work there without signal, and zooming past the saved detail scales up the saved tiles instead of going blank. A banner shows when the device is offline, saved areas are outlined, and the base map switches to USGS Topo. OpenStreetMap, OpenTopoMap and Esri tiles are never saved because their terms forbid bulk download, and search needs a connection.
 - **Search** (top left, minimizable) takes a street address, a place or peak name, or `lat, lng` coordinates.
 - **Overlay bar** (left side, slides out) drops down from the layers button and toggles shade elevations, sun exposure, slope direction, slope angle and hillshade with one tap each, plus the profile tool.
 - Base maps: USGS Topo, OpenTopoMap, OpenStreetMap streets, Esri satellite. Hillshade has its own strength slider.
@@ -18,7 +19,7 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 
 ## Install on a phone
 
-The site is an installable web app. In Chrome on Android, open the menu and choose **Install app** (or **Add to Home screen**). On iPhone, use Safari's Share button and **Add to Home Screen**. The app opens full screen at the last place you viewed. The interface opens offline, but map and terrain tiles need a connection.
+The site is an installable web app. In Chrome on Android, open the menu and choose **Install app** (or **Add to Home screen**). On iPhone, use Safari's Share button and **Add to Home Screen**. The app opens full screen at the last place you viewed, and it starts without signal: the map library is vendored and the service worker keeps every app file. Map tiles are only available offline inside saved areas.
 
 ## Run locally
 
@@ -43,7 +44,9 @@ python3 -m http.server 8000
 | `pointinfo.js` | Tap popup: elevation, slope, facing direction, sun hours with a terrain horizon |
 | `search.js` | Geocoding |
 | `profile.js` | Elevation profile sampling and chart |
+| `offline.js` | Saved areas: tile lists, downloads, storage, and serving saved or scaled-up tiles |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Installable app: service worker (network-first, offline fallback), manifest and icons |
+| `vendor/` | MapLibre GL JS 6.10.0 (BSD-3-Clause) and tz-lookup 11.7.0 (CC0), copied unchanged so the app starts offline |
 
 ## Data
 

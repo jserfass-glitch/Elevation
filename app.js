@@ -1,4 +1,4 @@
-import * as maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.mjs';
+import * as maplibregl from './vendor/maplibre-gl-6.10.0/maplibre-gl.mjs';
 import { DEM_URL, DEM_MAX_ZOOM, DEM_TILE_SIZE, loadTile, lngToX, latToY, xToLng, yToLat, wrapX } from './dem.js';
 import { sunPosition, sunTimes, lightPhase, GOLDEN_LOW, GOLDEN_HIGH } from './sun.js';
 import { SunRenderer, AspectRenderer, SlopeRenderer, SLOPE_CLASSES } from './terrain.js';
@@ -6,9 +6,10 @@ import { DualRange } from './dualrange.js';
 import { initSearch } from './search.js';
 import { pointInfo } from './pointinfo.js';
 import { sampleProfile, drawProfileChart, simplify } from './profile.js';
+import { DETAIL, fetchTile, saveArea, deleteArea, listAreas, estimateArea } from './offline.js';
 
 // Time zone of a map location, so times read in local time there.
-const tzLookup = import('https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup@11.7.0/+esm')
+const tzLookup = import('./vendor/tz-lookup-11.7.0/tz-lookup.mjs')
   .then((m) => m.default)
   .catch(() => null);
 const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -28,7 +29,8 @@ const RAMP = ['#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026'];
 
 const BASEMAPS = {
   usgs: {
-    tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'],
+    // cached:// goes through the offline store (see addProtocol below).
+    tiles: ['cached://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'],
     maxzoom: 16,
     attribution: 'USGS The National Map',
   },
@@ -102,7 +104,7 @@ const hillshadePaint = (v) => ({
 const sources = {
   dem: {
     type: 'raster-dem',
-    tiles: [DEM_URL],
+    tiles: [DEM_URL.replace('https://', 'cached://')],
     encoding: 'terrarium',
     tileSize: DEM_TILE_SIZE,
     maxzoom: DEM_MAX_ZOOM,
@@ -147,6 +149,14 @@ layers.push(
   { id: 'roads', type: 'raster', source: 'roads', layout: { visibility: 'none' } },
   { id: 'places', type: 'raster', source: 'places', layout: { visibility: 'none' } },
 );
+
+// Tiles that can be saved for offline use load through the offline store:
+// a saved copy if there is one, otherwise the network.
+maplibregl.addProtocol('cached', async (params, abortController) => {
+  const r = await fetchTile(params.url.replace(/^cached:\/\//, 'https://'), abortController.signal);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return { data: await r.arrayBuffer() };
+});
 
 // Opened without a position in the URL (e.g. from the home-screen icon):
 // start where the map was last left.
@@ -932,17 +942,31 @@ ui.collapse.addEventListener('click', () => {
   ui.collapse.setAttribute('aria-expanded', String(!collapsed));
 });
 
-// On phones the panel (or the profile sheet) is a bottom sheet; lift the
-// scale bar and attribution above it.
+// Bottom sheets (profile, offline maps): one open at a time. On phones the open
+// sheet, or else the panel, sits at the bottom; lift the scale bar and
+// attribution above it.
 const phone = window.matchMedia('(max-width: 600px)');
+const sheets = { profile: $('profile-sheet'), offline: $('offline-sheet') };
+const sheetClosers = {};
+let openSheetName = null;
+function showSheet(name) {
+  if (openSheetName && openSheetName !== name) sheetClosers[openSheetName]?.();
+  openSheetName = name;
+  for (const [n, el] of Object.entries(sheets)) {
+    el.classList.toggle('open', n === name);
+    el.setAttribute('aria-hidden', String(n !== name));
+  }
+  document.body.classList.toggle('sheet-open', !!name);
+  updateSheetHeight();
+}
 function updateSheetHeight() {
-  const sheet = document.body.classList.contains('profiling') ? $('profile-sheet') : ui.panel;
+  const sheet = openSheetName ? sheets[openSheetName] : ui.panel;
   const h = phone.matches ? sheet.offsetHeight + 10 : 0;
   document.documentElement.style.setProperty('--sheet-h', `${h}px`);
 }
 const sheetObserver = new ResizeObserver(updateSheetHeight);
 sheetObserver.observe(ui.panel);
-sheetObserver.observe($('profile-sheet'));
+Object.values(sheets).forEach((el) => sheetObserver.observe(el));
 
 // ---------- Search ----------
 
@@ -1030,7 +1054,6 @@ let profileMode = 'draw';
 const route = { start: null, legs: [] }; // points are [lng, lat]
 let boundaryMarkers = [];
 const hoverMarker = marker('hover-marker', '');
-const profileSheet = $('profile-sheet');
 const profileTool = $('profile-tool');
 let profileRun = 0;
 const routeEnd = () => (route.legs.length ? route.legs[route.legs.length - 1].at(-1) : route.start);
@@ -1073,16 +1096,20 @@ function updateProfileHint() {
 }
 
 function setProfiling(on) {
+  if (profiling === on) return;
   profiling = on;
   document.body.classList.toggle('profiling', on);
   profileTool.setAttribute('aria-pressed', String(on));
-  profileSheet.classList.toggle('open', on);
-  profileSheet.setAttribute('aria-hidden', String(!on));
-  if (on) popup.remove();
-  else clearProfile();
+  if (on) {
+    popup.remove();
+    showSheet('profile');
+  } else {
+    clearProfile();
+    if (openSheetName === 'profile') showSheet(null);
+  }
   applyProfileMode();
-  updateSheetHeight();
 }
+sheetClosers.profile = () => setProfiling(false);
 profileTool.addEventListener('click', () => setProfiling(!profiling));
 $('profile-close').addEventListener('click', () => setProfiling(false));
 
@@ -1230,6 +1257,200 @@ async function refreshProfile() {
   updateSheetHeight();
 }
 
+// ---------- Offline maps ----------
+// Save the area inside the dashed box for use without signal. The tile work
+// lives in offline.js; this is the sheet, the map outlines and the banner.
+
+const offlineTool = $('offline-tool');
+let offlineDetail = 'standard';
+let offlineDownload = null; // AbortController while a download runs
+const OFFLINE_MAX_BYTES = 1.5e9;
+const OFFLINE_CONFIRM_BYTES = 300e6;
+
+const fmtBytes = (b) =>
+  b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
+
+function setOfflineOpen(on) {
+  offlineTool.setAttribute('aria-pressed', String(on));
+  if (on) {
+    popup.remove();
+    showSheet('offline');
+    renderOfflineAreas();
+    requestAnimationFrame(updateOfflineEstimate); // after the sheet has its size
+  } else if (openSheetName === 'offline') {
+    showSheet(null);
+  }
+  updateOfflineLayers();
+}
+sheetClosers.offline = () => setOfflineOpen(false);
+offlineTool.addEventListener('click', () => setOfflineOpen(openSheetName !== 'offline'));
+$('offline-close').addEventListener('click', () => setOfflineOpen(false));
+
+for (const key of Object.keys(DETAIL)) {
+  $(`offline-detail-${key}`).addEventListener('click', () => {
+    offlineDetail = key;
+    for (const k of Object.keys(DETAIL)) $(`offline-detail-${k}`).setAttribute('aria-pressed', String(k === key));
+    updateOfflineEstimate();
+  });
+}
+
+// The part of the map not hidden by the panel, search bar or sheet.
+function offlineBounds() {
+  const canvas = map.getCanvas().getBoundingClientRect();
+  const sheetTop = sheets.offline.getBoundingClientRect().top - canvas.top;
+  const left = phone.matches ? 10 : $('left').getBoundingClientRect().right - canvas.left + 56;
+  const top = phone.matches ? 110 : 10;
+  const right = canvas.width - (phone.matches ? 56 : 60);
+  const bottom = Math.max(top + 40, Math.min(canvas.height - 10, sheetTop - 10));
+  const sw = map.unproject([Math.min(left, right - 40), bottom]);
+  const ne = map.unproject([right, top]);
+  return [sw.lng, sw.lat, ne.lng, ne.lat];
+}
+
+const boxFeature = ([w, s, e, n], props = {}) => ({
+  type: 'Feature',
+  properties: props,
+  geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
+});
+
+function updateOfflineEstimate() {
+  if (openSheetName !== 'offline') return;
+  const bounds = offlineBounds();
+  map.getSource('offline-preview')?.setData({ type: 'FeatureCollection', features: [boxFeature(bounds)] });
+  const est = estimateArea({ bounds, detail: offlineDetail });
+  const tooBig = est.bytes > OFFLINE_MAX_BYTES;
+  const offline = navigator.onLine === false;
+  $('offline-estimate').textContent = offline
+    ? 'Connect to the internet to save new areas'
+    : tooBig
+      ? `${est.widthKm.toFixed(0)} × ${est.heightKm.toFixed(0)} km is too big to save; zoom in`
+      : `${est.widthKm.toFixed(1)} × ${est.heightKm.toFixed(1)} km · about ${fmtBytes(est.bytes)}`;
+  $('offline-save').disabled = offline || tooBig || !!offlineDownload;
+}
+
+function updateOfflineLayers() {
+  const areas = listAreas();
+  offlineTool.classList.toggle('has-areas', areas.length > 0);
+  const show = openSheetName === 'offline' || navigator.onLine === false;
+  map.getSource('offline-areas')?.setData({
+    type: 'FeatureCollection',
+    features: show ? areas.map((a) => boxFeature(a.bounds, { name: a.name })) : [],
+  });
+  if (openSheetName !== 'offline') map.getSource('offline-preview')?.setData({ type: 'FeatureCollection', features: [] });
+}
+
+async function renderOfflineAreas() {
+  const areas = listAreas();
+  const list = $('offline-areas');
+  list.replaceChildren(
+    ...(areas.length
+      ? areas.map((a) => {
+          const li = document.createElement('li');
+          const info = Object.assign(document.createElement('span'), { className: 'grow' });
+          info.append(
+            Object.assign(document.createElement('span'), { className: 'area-name', textContent: a.name }),
+            Object.assign(document.createElement('span'), {
+              className: 'area-meta',
+              textContent: `${fmtBytes(a.bytes)} · ${DETAIL[a.detail].label} · ${new Date(a.created).toLocaleDateString()}${a.failed ? ` · ${a.failed} tiles missing` : ''}`,
+            }),
+          );
+          const go = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Go to' });
+          go.addEventListener('click', () => map.fitBounds([[a.bounds[0], a.bounds[1]], [a.bounds[2], a.bounds[3]]], { padding: 30 }));
+          const del = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Delete' });
+          del.addEventListener('click', async () => {
+            if (!confirm(`Delete “${a.name}” from this device?`)) return;
+            del.disabled = true;
+            await deleteArea(a.id);
+            renderOfflineAreas();
+            updateOfflineLayers();
+          });
+          li.append(info, go, del);
+          return li;
+        })
+      : [Object.assign(document.createElement('li'), { className: 'muted', textContent: 'None yet.' })]),
+  );
+  const storage = $('offline-storage');
+  storage.textContent = '';
+  if (!navigator.storage?.estimate) return;
+  const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+  const persisted = (await navigator.storage.persisted?.()) ?? false;
+  storage.textContent = `This app is using ${fmtBytes(usage)} of storage; about ${fmtBytes(Math.max(0, quota - usage))} more is available.${
+    areas.length && !persisted ? ' The browser may clear saved maps if the phone runs low on space.' : ''
+  }`;
+}
+
+$('offline-save').addEventListener('click', async () => {
+  const bounds = offlineBounds();
+  const est = estimateArea({ bounds, detail: offlineDetail });
+  if (est.bytes > OFFLINE_MAX_BYTES) return;
+  if (est.bytes > OFFLINE_CONFIRM_BYTES && !confirm(`This area is about ${fmtBytes(est.bytes)}. Download it?`)) return;
+  const c = map.getCenter();
+  const name = $('offline-name').value.trim() || `Near ${c.lat.toFixed(3)}, ${c.lng.toFixed(3)}`;
+  offlineDownload = new AbortController();
+  $('offline-save').disabled = true;
+  $('offline-message').textContent = '';
+  const progress = $('offline-progress');
+  progress.hidden = false;
+  const bar = progress.querySelector('progress');
+  const label = progress.querySelector('span');
+  bar.value = 0;
+  label.textContent = 'Starting…';
+  // Keep the screen on so the phone doesn't suspend the download.
+  const wake = await navigator.wakeLock?.request('screen').catch(() => null);
+  let frame = 0;
+  try {
+    const area = await saveArea(
+      { name, bounds, detail: offlineDetail },
+      {
+        signal: offlineDownload.signal,
+        onProgress: ({ done, total, bytes }) => {
+          if (frame) return;
+          frame = requestAnimationFrame(() => {
+            frame = 0;
+            bar.value = done / total;
+            label.textContent = `${done.toLocaleString()} / ${total.toLocaleString()} · ${fmtBytes(bytes)}`;
+          });
+        },
+      },
+    );
+    $('offline-name').value = '';
+    $('offline-message').textContent = `Saved “${area.name}” (${fmtBytes(area.bytes)}).${
+      area.failed ? ` ${area.failed} tiles couldn't be downloaded; saving again later fills them in.` : ''
+    }`;
+  } catch (e) {
+    $('offline-message').textContent = e.name === 'AbortError' ? 'Download canceled.' : `Download stopped: ${e.message}`;
+  } finally {
+    offlineDownload = null;
+    progress.hidden = true;
+    wake?.release().catch(() => {});
+    renderOfflineAreas();
+    updateOfflineLayers();
+    updateOfflineEstimate();
+  }
+});
+$('offline-cancel').addEventListener('click', () => offlineDownload?.abort());
+
+// Offline banner. Only USGS Topo is saved, so switch to it without signal.
+function updateOnlineState() {
+  const offline = navigator.onLine === false;
+  const banner = $('offline-banner');
+  banner.hidden = !offline;
+  banner.textContent = listAreas().length
+    ? 'Offline: saved areas and USGS Topo only'
+    : 'Offline: nothing saved yet. Use Offline maps next time you have signal.';
+  updateOfflineEstimate();
+  if (offline) {
+    const usgs = document.querySelector('input[name=base][value=usgs]');
+    if (!usgs.checked) {
+      usgs.checked = true;
+      usgs.dispatchEvent(new Event('change'));
+    }
+  }
+  updateOfflineLayers();
+}
+window.addEventListener('online', updateOnlineState);
+window.addEventListener('offline', updateOnlineState);
+
 // ---------- View changes ----------
 
 let viewTimer;
@@ -1246,6 +1467,7 @@ map.on('moveend', () => {
     updateSunRange();
     updateTerrainGrid();
     drawSlope();
+    updateOfflineEstimate();
   }, 150);
 });
 if ('serviceWorker' in navigator) {
@@ -1255,6 +1477,18 @@ if ('serviceWorker' in navigator) {
 }
 
 map.on('load', () => {
+  const empty = { type: 'FeatureCollection', features: [] };
+  map.addSource('offline-areas', { type: 'geojson', data: empty });
+  map.addSource('offline-preview', { type: 'geojson', data: empty });
+  map.addLayer({ id: 'offline-areas-fill', type: 'fill', source: 'offline-areas', paint: { 'fill-color': '#0e7490', 'fill-opacity': 0.06 } });
+  map.addLayer({ id: 'offline-areas', type: 'line', source: 'offline-areas', paint: { 'line-color': '#0e7490', 'line-width': 2 } });
+  map.addLayer({
+    id: 'offline-preview',
+    type: 'line',
+    source: 'offline-preview',
+    paint: { 'line-color': '#0e7490', 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
+  });
+  updateOnlineState();
   map.addSource('profile-line', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({
     id: 'profile-line',

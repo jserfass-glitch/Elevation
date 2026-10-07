@@ -12,6 +12,13 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
+# Vendored libraries carry their version in the path and never change, so
+# browsers can keep them; that also lets the map's worker load them offline.
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[headers]]
   for = "/manifest.webmanifest"
   [headers.values]

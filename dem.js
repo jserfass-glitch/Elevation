@@ -3,6 +3,8 @@
 // AWS Open Data terrain tiles (Terrarium encoding): elevation in meters =
 // R * 256 + G + B / 256 - 32768.
 
+import { fetchTile } from './offline.js';
+
 export const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 export const DEM_MAX_ZOOM = 15;
 export const DEM_TILE_SIZE = 256;
@@ -20,7 +22,7 @@ export function loadTile(z, x, y) {
     tileCache.set(key, entry);
     return entry;
   }
-  entry = fetch(DEM_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y))
+  entry = fetchTile(DEM_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y))
     .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(r.status))))
     .then((blob) => createImageBitmap(blob))
     .then((bmp) => {

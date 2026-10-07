@@ -119,6 +119,10 @@ export function initSearch({ form, input, list, getCenter, onPick }) {
   // Shows Photon results as soon as they arrive and puts Census address
   // matches on top when those come back.
   async function search(q) {
+    if (navigator.onLine === false) {
+      resultsQuery = q;
+      return show([], 'Offline: search needs a connection. Typed coordinates still work.');
+    }
     abort?.abort();
     abort = new AbortController();
     const { signal } = abort;

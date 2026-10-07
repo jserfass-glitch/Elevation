@@ -378,9 +378,9 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 #layerbar-items hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--border); }
 #profile-tool[aria-pressed="true"] { color: #fff; background: #0e7490; }
 
-/* ---------- Elevation profile sheet ---------- */
+/* ---------- Bottom sheets (elevation profile, offline maps) ---------- */
 
-#profile-sheet {
+.sheet {
   position: absolute;
   left: 320px;
   right: 10px;
@@ -393,7 +393,7 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   transform: translateY(24px);
   transition: transform var(--dur) var(--ease), opacity var(--dur) var(--ease), visibility 0s var(--dur);
 }
-#profile-sheet.open { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+.sheet.open { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
 .profile-tools { display: flex; align-items: center; gap: 10px; padding: 0 12px 8px; flex-wrap: wrap; }
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .segmented button { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 0; height: 28px; padding: 0 10px; font-size: 13px; }
@@ -403,10 +403,10 @@ section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
 #profile-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur) var(--ease); }
 #profile-body.open { grid-template-rows: 1fr; }
 #profile-inner { min-height: 0; overflow: hidden; }
-#profile-sheet header { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; flex-wrap: wrap; }
-#profile-sheet header .spacer { flex: 1; }
-#profile-sheet header button { height: 26px; }
-#profile-sheet header .icon-btn { height: 28px; width: 28px; font-size: 20px; }
+.sheet header { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; flex-wrap: wrap; }
+.sheet header .spacer { flex: 1; }
+.sheet header button { height: 26px; }
+.sheet header .icon-btn { height: 28px; width: 28px; font-size: 20px; }
 #profile-inner { padding: 0 12px 10px; }
 #profile-chart { display: block; width: 100%; height: 150px; touch-action: none; }
 #profile-chart .seg-band { fill: transparent; }
@@ -504,11 +504,63 @@ body.profile-draw #map .maplibregl-canvas-container { touch-action: none !import
   /* Keep the scale bar and attribution above the bottom sheet. */
   .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: var(--sheet-h); }
   #layerbar { top: calc(60px + env(safe-area-inset-top)); left: 10px; }
-  #profile-sheet { left: 10px; max-height: 55%; overflow-y: auto; }
-  #profile-sheet header { flex-wrap: nowrap; }
+  .sheet { left: 10px; max-height: 55%; overflow-y: auto; }
+  .sheet header { flex-wrap: nowrap; }
   /* Once the chart is up the hint just takes room from the buttons. */
   #profile-sheet:has(#profile-body.open) #profile-hint { display: none; }
-  body.profiling #panel { transform: translateY(calc(100% + 20px)); opacity: 0; pointer-events: none; }
+  body.sheet-open #panel { transform: translateY(calc(100% + 20px)); opacity: 0; pointer-events: none; }
+}
+
+/* ---------- Offline maps ---------- */
+
+#offline-body { padding: 0 12px 12px; }
+#offline-body p { margin: 0 0 8px; }
+#offline-name {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+#offline-estimate { font-variant-numeric: tabular-nums; }
+button.primary { background: #0e7490; border-color: #0e7490; color: #fff; height: 30px; padding: 0 14px; font-weight: 600; }
+button.primary:disabled { opacity: 0.5; cursor: default; }
+#offline-progress { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+#offline-progress[hidden] { display: none; }
+#offline-progress progress { flex: 1; accent-color: #0e7490; }
+#offline-progress span { font-variant-numeric: tabular-nums; white-space: nowrap; }
+#offline-areas { list-style: none; margin: 0; padding: 0; }
+#offline-areas li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); }
+#offline-areas li:first-child { border-top: 0; }
+#offline-areas .area-name { font-weight: 600; }
+#offline-areas .area-meta { display: block; color: var(--muted); font-size: 12px; }
+#offline-areas .grow { flex: 1; min-width: 0; }
+#offline-areas button { height: 26px; }
+#offline-sheet h2 { margin-top: 12px; }
+#layerbar-items #offline-tool[aria-pressed="true"] { color: #fff; background: #0e7490; }
+#layerbar-items #offline-tool.has-areas:not([aria-pressed="true"]) { color: #0e7490; }
+
+#offline-banner {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: calc(100% - 140px);
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+#offline-banner[hidden] { display: none; }
+@media (max-width: 600px) {
+  #offline-banner { top: calc(60px + env(safe-area-inset-top)); max-width: calc(100% - 120px); }
 }
 
 /* Popups fade and rise in. */

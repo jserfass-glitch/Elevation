@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@6.10.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="vendor/maplibre-gl-6.10.0/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -30,6 +30,7 @@
     <symbol id="i-slope" viewBox="0 0 24 24"><path d="M3 20h18V6L3 20Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20a7 7 0 0 0-1.5-4.3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 17c3-6 6 2 9-3s5-7 9-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-pan" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-offline" viewBox="0 0 24 24"><path d="M12 3v11m0 0-4-4m4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-profile" viewBox="0 0 24 24"><path d="M3 19 8 9l4 6 3-4 6 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="3" cy="19" r="2" fill="currentColor"/><circle cx="8" cy="9" r="2" fill="currentColor"/><circle cx="15" cy="11" r="2" fill="currentColor"/><circle cx="21" cy="19" r="2" fill="currentColor"/></symbol>
     <symbol id="i-roads" viewBox="0 0 24 24"><path d="M7 21 10.5 3M17 21 13.5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18.5v2M12 12v2.5M12 6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   </svg>
@@ -195,10 +196,11 @@
       <button type="button" class="icon-btn" data-overlay="hillshade" aria-pressed="true" title="Hillshade" aria-label="Hillshade"><svg aria-hidden="true"><use href="#i-hillshade"/></svg></button>
       <hr>
       <button type="button" class="icon-btn" id="profile-tool" aria-pressed="false" title="Elevation profile" aria-label="Elevation profile"><svg aria-hidden="true"><use href="#i-profile"/></svg></button>
+      <button type="button" class="icon-btn" id="offline-tool" aria-pressed="false" title="Offline maps" aria-label="Offline maps"><svg aria-hidden="true"><use href="#i-offline"/></svg></button>
     </div>
   </nav>
 
-  <section id="profile-sheet" class="card" aria-label="Elevation profile" aria-hidden="true">
+  <section id="profile-sheet" class="card sheet" aria-label="Elevation profile" aria-hidden="true">
     <header>
       <strong>Elevation profile</strong>
       <span class="spacer"></span>
@@ -222,6 +224,39 @@
       </div>
     </div>
   </section>
+
+  <section id="offline-sheet" class="card sheet" aria-label="Offline maps" aria-hidden="true">
+    <header>
+      <strong>Offline maps</strong>
+      <span class="spacer"></span>
+      <button id="offline-close" type="button" class="icon-btn" aria-label="Close offline maps" title="Close">×</button>
+    </header>
+    <div id="offline-body">
+      <p class="small muted">Saves USGS Topo and elevation data for the dashed box, so every shading tool, the tap popup and the profile work there without signal. Other base maps and search need a connection.</p>
+      <div class="row">
+        <input id="offline-name" type="text" placeholder="Name this area" aria-label="Area name" maxlength="60">
+        <span class="segmented" role="group" aria-label="Detail">
+          <button id="offline-detail-standard" type="button" aria-pressed="true" title="USGS Topo to zoom 15, elevation to zoom 14; closer zooms are scaled up">Standard</button>
+          <button id="offline-detail-full" type="button" aria-pressed="false" title="USGS Topo to zoom 16, elevation to zoom 15">Full</button>
+        </span>
+      </div>
+      <div class="row">
+        <span id="offline-estimate" class="small muted">&nbsp;</span>
+        <button id="offline-save" type="button" class="primary">Save area</button>
+      </div>
+      <div id="offline-progress" hidden>
+        <progress max="1" value="0"></progress>
+        <span class="small"></span>
+        <button id="offline-cancel" type="button">Cancel</button>
+      </div>
+      <div id="offline-message" class="small"></div>
+      <h2>Saved areas</h2>
+      <ul id="offline-areas" class="small"></ul>
+      <div id="offline-storage" class="small muted"></div>
+    </div>
+  </section>
+
+  <div id="offline-banner" role="status" hidden></div>
 
   <script type="module" src="app.js"></script>
 </body>
