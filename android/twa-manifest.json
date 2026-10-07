@@ -1,0 +1,51 @@
+{
+  "packageId": "app.netlify.elevationator",
+  "host": "elevationator.netlify.app",
+  "name": "Elevation Shading",
+  "launcherName": "Elevation",
+  "display": "standalone",
+  "themeColor": "#1B2430",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#1B2430",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://elevationator.netlify.app/icons/icon-512.png",
+  "maskableIconUrl": "https://elevationator.netlify.app/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./elevation-release.keystore",
+    "alias": "elevation"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "unknown",
+  "webManifestUrl": "https://elevationator.netlify.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://elevationator.netlify.app/",
+  "minSdkVersion": 21,
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "1.0.0"
+}

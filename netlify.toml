@@ -19,6 +19,20 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Android app download and the Digital Asset Links file that lets the app
+# open this site full screen.
+[[headers]]
+  for = "/downloads/*.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Content-Disposition = "attachment"
+
+[[headers]]
+  for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"
+    Access-Control-Allow-Origin = "*"
+
 [[headers]]
   for = "/manifest.webmanifest"
   [headers.values]

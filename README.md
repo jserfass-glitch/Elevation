@@ -21,6 +21,26 @@ A static web map for reading terrain, modeled on CalTopo's shading tools.
 
 The site is an installable web app. In Chrome on Android, open the menu and choose **Install app** (or **Add to Home screen**). On iPhone, use Safari's Share button and **Add to Home Screen**. The app opens full screen at the last place you viewed, and it starts without signal: the map library is vendored and the service worker keeps every app file. Map tiles are only available offline inside saved areas.
 
+## Android app (APK)
+
+`downloads/Elevation-1.0.0.apk` is an Android app built from this site as a Trusted Web Activity with Google's [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap). It opens https://elevationator.netlify.app full screen in Chrome's engine, so every deploy updates the app without reinstalling, and the offline features work the same as in the browser. Download it on the phone from https://elevationator.netlify.app/downloads/Elevation-1.0.0.apk and allow installs from that browser when Android asks.
+
+- Package `app.netlify.elevationator`, Android 5.0 and up. The locate button works through Chrome's location permission.
+- `.well-known/assetlinks.json` holds the signing certificate's SHA-256 fingerprint. Without it the app shows a small address bar at the top.
+- `android/` is the generated project. The signing key is **not** in the repo; it is kept outside it, and every future version must be signed with the same key or Android will refuse to install it over the old one.
+
+To build a new version (needs JDK 17 and the Android SDK with build-tools 34):
+
+```sh
+cd android
+# bump appVersionCode and appVersionName in twa-manifest.json and app/build.gradle
+./gradlew assembleRelease
+zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+apksigner sign --ks /path/to/elevation-release.keystore --ks-key-alias elevation --out Elevation-x.y.z.apk aligned.apk
+```
+
+Builds use Google's mirror of Maven Central (see `android/build.gradle`) because Maven Central rate-limits shared build machines.
+
 ## Run locally
 
 No build step. Serve the folder with any static server:

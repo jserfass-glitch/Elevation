@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.netlify.elevationator",
+      "sha256_cert_fingerprints": ["20:2F:5A:9D:3A:C0:FB:64:50:2C:DF:07:4C:DA:33:9E:92:43:28:27:CA:7B:5C:BD:1B:AA:3D:F9:77:10:B5:36"]
+    }
+  }
+]
